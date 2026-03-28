@@ -1,24 +1,20 @@
 import telebot
 import requests
 import re
-import uuid
 import time
 from collections import defaultdict
+from openai import OpenAI
 
 TELEGRAM_TOKEN = "8785895690:AAFjNx1sMzJvjPgo6G5Qe-qSz5-E4QkN1_A"
-GIGACHAT_AUTH_KEY = "MDE5ZDMzOTYtMjhjYy03M2YzLWJlNGItOTAzYTZiYzI3YzA0OmQzYTk3YzdmLWRlZDMtNDE2ZS04NGIzLTg1YmU2OWJjZTg3OA=="
+NAGA_API_KEY = "ng-1l2GbngFEcAClJs0QylQgjlcXm215HTf"
+NAGA_MODEL = "gpt-4o-mini"
 SEARXNG_URL = "https://searxng-railway-production-6f14.up.railway.app/search"
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
-
-access_token = None
-token_expires_at = 0
+client = OpenAI(base_url="https://api.naga.ac/v1", api_key=NAGA_API_KEY)
 
 user_memory = defaultdict(list)
 MAX_MEMORY = 10
-
-def get_user_memory(user_id):
-    return user_memory[user_id]
 
 def add_to_memory(user_id, role, content):
     user_memory[user_id].append({"role": role, "content": content})
@@ -29,6 +25,9 @@ def clear_memory(user_id):
     if user_id in user_memory:
         user_memory[user_id] = []
     return "Мяу! Я всё забыл. Начинаем с чистого листа! 🐱"
+
+def get_user_memory(user_id):
+    return user_memory[user_id]
 
 def search_web(query):
     try:
@@ -55,49 +54,11 @@ def search_web(query):
         print(f"Ошибка поиска: {e}")
         return None
 
-def get_access_token():
-    global access_token, token_expires_at
-    
-    if access_token and time.time() < token_expires_at:
-        return access_token
-    
-    url = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
-    
-    payload = {'scope': 'GIGACHAT_API_PERS'}
-    
-    headers = {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Accept': 'application/json',
-        'RqUID': str(uuid.uuid4()),
-        'Authorization': f'Basic {GIGACHAT_AUTH_KEY}'
-    }
-    
+def ask_naga(question, user_id, search_results=None, include_links=False):
     try:
-        response = requests.post(url, headers=headers, data=payload, verify=False, timeout=30)
-        
-        if response.status_code == 200:
-            data = response.json()
-            access_token = data.get('access_token')
-            token_expires_at = time.time() + 25 * 60
-            print("✅ Получен новый Access Token")
-            return access_token
-        else:
-            return None
-    except Exception as e:
-        print(f"Ошибка: {e}")
-        return None
-
-def ask_gigachat(question, user_id, search_results=None, include_links=False):
-    try:
-        token = get_access_token()
-        if not token:
-            return fallback_response(question, user_id, search_results, include_links)
-        
-        url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
-        
         history = get_user_memory(user_id)
         
-        system_prompt = """Ты кот-помощник по имени Кот. Отвечай дружелюбно на русском языке.
+        system_prompt = """Ты — кот-помощник по имени Кот. Отвечай дружелюбно на русском языке.
 
 Правила:
 1. Отвечай на русском языке
@@ -135,37 +96,25 @@ def ask_gigachat(question, user_id, search_results=None, include_links=False):
         
         messages.append({"role": "user", "content": enhanced_question})
         
-        payload = {
-            "model": "GigaChat",
-            "messages": messages,
-            "temperature": 0.7,
-            "max_tokens": 500
-        }
+        response = client.chat.completions.create(
+            model=NAGA_MODEL,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=500
+        )
         
-        headers = {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-            'Authorization': f'Bearer {token}'
-        }
+        answer = response.choices[0].message.content
         
-        response = requests.post(url, headers=headers, json=payload, verify=False, timeout=30)
+        add_to_memory(user_id, "user", question)
+        add_to_memory(user_id, "assistant", answer)
         
-        if response.status_code == 200:
-            data = response.json()
-            answer = data['choices'][0]['message']['content']
-            
-            add_to_memory(user_id, "user", question)
-            add_to_memory(user_id, "assistant", answer)
-            
-            if include_links and search_results:
-                links = "\n\n📌 Источники:\n" + "\n".join([r["url"] for r in search_results[:2]])
-                return answer + links
-            return answer
-        else:
-            return fallback_response(question, user_id, search_results, include_links)
+        if include_links and search_results:
+            links = "\n\n📌 Источники:\n" + "\n".join([r["url"] for r in search_results[:2]])
+            return answer + links
+        return answer
             
     except Exception as e:
-        print(f"Ошибка: {e}")
+        print(f"❌ Ошибка Naga: {e}")
         return fallback_response(question, user_id, search_results, include_links)
 
 def fallback_response(question, user_id, search_results=None, include_links=False):
@@ -175,12 +124,12 @@ def fallback_response(question, user_id, search_results=None, include_links=Fals
     
     if search_results:
         if include_links:
-            reply = f"Мяу! Вот что я нашёл:\n\n"
+            reply = "Мяу! Вот что я нашёл:\n\n"
             for r in search_results[:3]:
                 reply += f"📌 {r['title']}\n{r['url']}\n\n"
             return reply + "🐱"
         else:
-            reply = f"Мяу! Вот что я нашёл:\n\n"
+            reply = "Мяу! Вот что я нашёл:\n\n"
             for r in search_results[:2]:
                 reply += f"• {r['title']}\n"
             return reply + "\nЧтобы увидеть ссылки, напиши «Котопоиск +ссылка» 🐱"
@@ -220,11 +169,9 @@ def handle_message(message):
     
     text_lower = message.text.lower()
     
-    # Проверка на команду Котопоиск
     if "котопоиск" in text_lower:
         include_links = "+ссылка" in text_lower
         
-        # Убираем "котопоиск" и "+ссылка" из запроса
         user_query = re.sub(r'котопоиск', '', text_lower)
         if include_links:
             user_query = re.sub(r'\+ссылка', '', user_query)
@@ -240,7 +187,7 @@ def handle_message(message):
         
         if search_results:
             bot.edit_message_text("💭 Мяу... обрабатываю...", message.chat.id, status_msg.message_id)
-            answer = ask_gigachat(user_query, user_id, search_results, include_links)
+            answer = ask_naga(user_query, user_id, search_results, include_links)
             bot.delete_message(message.chat.id, status_msg.message_id)
         else:
             bot.edit_message_text("😿 Мяу... ничего не нашёл. Попробуй переформулировать запрос!", message.chat.id, status_msg.message_id)
@@ -251,7 +198,6 @@ def handle_message(message):
         bot.reply_to(message, answer)
         return
     
-    # Обычная проверка на слово "кот" или ответ на сообщение бота
     if "кот" in text_lower or is_reply_to_bot:
         user_query = message.text.strip()
         
@@ -265,14 +211,15 @@ def handle_message(message):
             return
         
         bot.send_chat_action(message.chat.id, "typing")
-        answer = ask_gigachat(user_query, user_id, None, False)
+        answer = ask_naga(user_query, user_id, None, False)
         bot.reply_to(message, answer)
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("🐱 КОТ-БОТ С ДВУМЯ РЕЖИМАМИ ПОИСКА!")
+    print("🐱 КОТ-БОТ С NAGA API ЗАПУЩЕН!")
     print("=" * 50)
     print(f"Бот: @{bot.get_me().username}")
+    print(f"Модель: {NAGA_MODEL}")
     print("\nПоиск в интернете:")
     print("• «Котопоиск что-то» — ответ без ссылок")
     print("• «Котопоиск +ссылка что-то» — ответ со ссылками")
@@ -281,4 +228,4 @@ if __name__ == "__main__":
     print("• «Кот посоветуй аниме» — аниме")
     print("• «Кот что я говорил» — память")
     print("=" * 50)
-    bot.infinity_polling() 
+    bot.infinity_polling()
