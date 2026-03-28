@@ -5,7 +5,7 @@ import time
 from collections import defaultdict
 
 TELEGRAM_TOKEN = "8785895690:AAFjNx1sMzJvjPgo6G5Qe-qSz5-E4QkN1_A"
-KIMI_API_KEY = "sk-2uHOnhgaQKZL0EIY4cSprAvaxBDZJ8gehJMkK5586IG0ikZi"
+MISTRAL_API_KEY = "I9PvXEOaGCsaAvjfMcPLSF0P5FrdmQJ9"
 SEARXNG_URL = "https://searxng-railway-production-6f14.up.railway.app/search"
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
@@ -58,12 +58,12 @@ def search_web(query):
         print(f"Ошибка поиска: {e}")
         return None
 
-def ask_kimi(question, user_id, search_results=None, include_links=False):
+def ask_mistral(question, user_id, search_results=None, include_links=False):
     try:
-        url = "https://api.moonshot.cn/v1/chat/completions"
+        url = "https://api.mistral.ai/v1/chat/completions"
         
         headers = {
-            "Authorization": f"Bearer {KIMI_API_KEY}",
+            "Authorization": f"Bearer {MISTRAL_API_KEY}",
             "Content-Type": "application/json"
         }
         
@@ -97,7 +97,7 @@ def ask_kimi(question, user_id, search_results=None, include_links=False):
             messages.append({"role": "user", "content": question})
 
         payload = {
-            "model": "moonshot-v1-8k",
+            "model": "mistral-small-latest",
             "messages": messages,
             "temperature": 0.7,
             "max_tokens": 500
@@ -117,7 +117,7 @@ def ask_kimi(question, user_id, search_results=None, include_links=False):
                 return answer + links
             return answer
         else:
-            print(f"❌ Ошибка Kimi: {response.status_code}")
+            print(f"❌ Ошибка Mistral: {response.status_code} - {response.text}")
             return fallback_response(question, user_id, search_results, include_links)
             
     except Exception as e:
@@ -158,7 +158,7 @@ def fallback_response(question, user_id, search_results=None, include_links=Fals
     elif "аниме" in q or "посоветуй" in q:
         return "Мяу! Советую:\n\n🎬 Киберпанк: Бегущие по краю\n🎬 Фрирен\n🎬 Дандадан\n\nПриятного просмотра! 🐱"
     elif "кто ты" in q:
-        return "Мяу! Я Кот — твой пушистый помощник! Использую Kimi AI 🐱"
+        return "Мяу! Я Кот — твой пушистый помощник! Использую Mistral AI 🐱"
     elif "что ты умеешь" in q:
         return "Мяу! Я умею:\n• Общаться 💬\n• Советовать аниме 🎬\n• Запоминать разговор 🧠\n• Искать в интернете 🔍\n\nПоиск:\n• «Котопоиск новости» — без ссылок\n• «Котопоиск +ссылка новости» — со ссылками 🐱"
     elif "спасибо" in q:
@@ -190,7 +190,7 @@ def handle_message(message):
         
         if search_results:
             bot.edit_message_text("💭 Мяу... обрабатываю...", message.chat.id, status_msg.message_id)
-            answer = ask_kimi(user_query, user_id, search_results, include_links)
+            answer = ask_mistral(user_query, user_id, search_results, include_links)
             bot.delete_message(message.chat.id, status_msg.message_id)
         else:
             bot.edit_message_text("😿 Мяу... ничего не нашёл. Попробуй переформулировать запрос!", message.chat.id, status_msg.message_id)
@@ -212,18 +212,24 @@ def handle_message(message):
             return
         
         bot.send_chat_action(message.chat.id, "typing")
-        answer = ask_kimi(user_query, user_id, None, False)
+        answer = ask_mistral(user_query, user_id, None, False)
         bot.reply_to(message, answer)
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("🐱 КОТ-БОТ С KIMI AI ЗАПУЩЕН!")
+    print("🐱 КОТ-БОТ С MISTRAL AI ЗАПУЩЕН!")
     print("=" * 50)
     print(f"Бот: @{bot.get_me().username}")
-    print("Модель: Kimi (moonshot-v1-8k)")
+    print("Модель: Mistral Small")
+    print("\nПоиск в интернете:")
+    print("• «Котопоиск что-то» — ответ без ссылок")
+    print("• «Котопоиск +ссылка что-то» — ответ со ссылками")
+    print("\nОбычное общение:")
+    print("• «Кот привет» — общение")
+    print("• «Кот посоветуй аниме» — аниме")
+    print("• «Кот что я говорил» — память")
     print("=" * 50)
     
-    # Запускаем с обработкой ошибок
     while True:
         try:
             bot.infinity_polling(timeout=60, long_polling_timeout=60)
