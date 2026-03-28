@@ -5,10 +5,10 @@ import re
 import time
 from gigachat import GigaChat
 
-# ========== ТВОИ ДАННЫЕ ==========
-TELEGRAM_TOKEN = "ТВОЙ_НОВЫЙ_ТОКЕН"  # Вставь новый токен
+# ========== ТВОИ ДАННЫЕ (СТАРЫЕ КЛЮЧИ - ВРЕМЕННО) ==========
+TELEGRAM_TOKEN = "8785895690:AAFjNx1sMzJvjPgo6G5Qe-qSz5-E4QkN1_A"
 SEARXNG_URL = "https://searxng-railway-production-6f14.up.railway.app/search"
-GIGACHAT_AUTH_KEY = "ТВОЙ_НОВЫЙ_КЛЮЧ"  # Вставь новый ключ
+GIGACHAT_AUTH_KEY = "MDE5ZDMzOTYtMjhjYy03M2YzLWJlNGItOTAzYTZiYzI3YzA0OmQzYTk3YzdmLWRlZDMtNDE2ZS04NGIzLTg1YmU2OWJjZTg3OA=="
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
@@ -40,32 +40,39 @@ def need_search(query):
     """Определяет, нужен ли поиск в интернете"""
     query_lower = query.lower()
     
-    # Простые вопросы, на которые не нужно искать
+    # Слова, которые явно говорят "ищи в интернете"
+    search_keywords = ["найди", "поищи", "узнай", "найди мне", "поищи в интернете"]
+    for word in search_keywords:
+        if word in query_lower:
+            return True
+    
+    # Если это запрос на аниме — НЕ ищем
+    anime_keywords = ["аниме", "посоветуй аниме", "какое аниме", "аниме посоветуй"]
+    for word in anime_keywords:
+        if word in query_lower:
+            return False
+    
+    # Если это приветствие или простой диалог — НЕ ищем
     simple_questions = [
         "привет", "здарова", "здравствуй", "hello", "hi",
-        "как дела", "как ты", "как сам", "how are you",
+        "как дела", "как ты", "как сам", "как жизнь",
         "что ты умеешь", "что можешь", "расскажи о себе",
-        "кто ты", "ты кто", "твое имя",
-        "спасибо", "благодарю", "thanks",
-        "пока", "до свидания", "bye",
-        "аниме", "посоветуй аниме", "аниме посоветуй",
-        "фильм", "кино", "что посмотреть"
+        "кто ты", "ты кто", "твое имя", "как тебя зовут",
+        "спасибо", "благодарю",
+        "пока", "до свидания", "покеда",
+        "что посмотреть", "посоветуй фильм", "кино посоветуй"
     ]
     
-    # Проверяем, простой ли вопрос
     for simple in simple_questions:
         if simple in query_lower:
             return False
     
-    # Если есть вопросительные слова — ищем
+    # Вопросительные слова — ищем
     question_words = ["кто", "что", "где", "когда", "почему", "зачем", "какой", "сколько"]
     for word in question_words:
         if word in query_lower:
-            return True
-    
-    # Если вопрос длинный и не в списке простых — ищем
-    if len(query.split()) > 3:
-        return True
+            if "аниме" not in query_lower:
+                return True
     
     return False
 
@@ -80,12 +87,11 @@ def ask_gigachat(question, search_results=None):
         ) as client:
             
             if search_results:
-                # Если есть результаты поиска
                 context = "\n\n".join([
                     f"📌 {r['title']}\n{r['content']}\n🔗 {r['url']}"
                     for r in search_results[:3]
                 ])
-                prompt = f"""Ты — кот-помощник по имени Кот. Отвечай на вопросы пользователя, используя ТОЛЬКО информацию из источников ниже. ОБЯЗАТЕЛЬНО ОТВЕЧАЙ НА РУССКОМ ЯЗЫКЕ.
+                prompt = f"""Ты — кот-помощник по имени Кот. Отвечай на вопросы пользователя, используя ТОЛЬКО информацию из источников ниже.
 
 Вопрос: {question}
 
@@ -94,14 +100,13 @@ def ask_gigachat(question, search_results=None):
 
 Правила:
 1. Отвечай кратко (2-3 предложения)
-2. Добавляй "мяу" или "мур" в ответ
+2. Добавляй "мяу" или "мур"
 3. В конце поставь 🐱
-4. ОБЯЗАТЕЛЬНО ОТВЕЧАЙ НА РУССКОМ ЯЗЫКЕ
+4. Обязательно отвечай на русском языке
 
 Ответ:"""
             else:
-                # Простой диалог без поиска
-                prompt = f"""Ты — кот-помощник по имени Кот. Ответь на вопрос дружелюбно и с юмором. ОБЯЗАТЕЛЬНО ОТВЕЧАЙ НА РУССКОМ ЯЗЫКЕ.
+                prompt = f"""Ты — кот-помощник по имени Кот. Отвечай дружелюбно и с юмором.
 
 Вопрос: {question}
 
@@ -110,94 +115,86 @@ def ask_gigachat(question, search_results=None):
 2. Будь милым котом, добавляй "мяу" или "мур"
 3. В конце поставь 🐱
 4. НЕ ищи информацию в интернете, отвечай от себя
-5. ОБЯЗАТЕЛЬНО ОТВЕЧАЙ НА РУССКОМ ЯЗЫКЕ
+5. Обязательно отвечай на русском языке
 
 Ответ:"""
             
             response = client.chat(prompt)
             answer = response.choices[0].message.content
             
-            # Добавляем ссылки, только если был поиск
             if search_results:
-                links = "\n\n📌 Источники:\n" + "\n".join([r["url"] for r in search_results[:2]])
-                return answer + links
-            
-            return answer
-            
-    except Exception as e:
+                links = "\n\n📌 Исто
 SearXNG
 SearXNG
 searxng-railway-production-6f14.up.railway.app
 
 
-print(f"Ошибка GigaChat: {e}")
+чники:\n" + "\n".join([r["url"] for r in search_results[:2]])
+                return answer + links
+            
+            return answer
+            
+    except Exception as e:
+        print(f"Ошибка GigaChat: {e}")
         return fallback_response(question)
 
 def fallback_response(question):
-    """Запасные ответы (без GigaChat) на русском"""
+    """Запасные ответы"""
     q = question.lower()
     
-    if "привет" in q or "здарова" in q or "hi" in q:
-        return "Мур-мяу! Приветствую, друг! Как настроение? 🐱"
+    if "привет" in q:
+        return "Мур-мяу! Приветствую! Как настроение? 🐱"
     
     elif "как дела" in q or "как ты" in q:
-        return "Мурлычу отлично! Греюсь на солнышке и жду твоих вопросов ☀️🐱"
+        return "Мурлычу отлично! Греюсь на солнышке ☀️🐱"
     
-    elif "что ты умеешь" in q or "что можешь" in q:
-        return "Мяу! Я умею:\n\n• Отвечать на вопросы 💬\n• Искать информацию в интернете 🔍\n• Советовать аниме 🎬\n• Просто быть милым котом 🐱\n\nПросто спроси меня о чём угодно!"
+    elif "что ты умеешь" in q:
+        return "Мяу! Я умею:\n\n• Общаться 💬\n• Искать в интернете 🔍\n• Советовать аниме 🎬\n\nПросто спроси меня! 🐱"
     
     elif "аниме" in q or "посоветуй" in q:
-        return "Мяу! Из свежего советую:\n\n🎬 «Киберпанк: Бегущие по краю»\n🎬 «Фрирен — провожающая в последний путь»\n🎬 «Дандадан»\n\nНаслаждайся просмотром! 🐱"
+        return "Мяу! Советую посмотреть:\n\n🎬 «Киберпанк: Бегущие по краю»\n🎬 «Фрирен»\n🎬 «Дандадан»\n\nПриятного просмотра! 🐱"
+    
+    elif "кто ты" in q:
+        return "Мяу! Я Кот — твой пушистый помощник! 🐱"
     
     elif "спасибо" in q:
-        return "Мур-мяу! Всегда пожалуйста! Рад помочь 😊🐱"
+        return "Мур-мяу! Всегда пожалуйста! 😊🐱"
     
-    elif "пока" in q or "до свидания" in q:
+    elif "пока" in q:
         return "Мяу! Пока-пока! Заходи ещё 🐱👋"
     
-    elif "кто ты" in q or "ты кто" in q:
-        return "Мяу! Я Кот — твой пушистый помощник! Могу ответить на вопросы, поискать информацию в интернете и посоветовать аниме 🐱"
-    
     else:
-        return f"Мяу... Я не совсем понял вопрос. Попробуй спросить что-то другое! 🐱"
+        return f"Мяу... Я не понял вопрос. Попробуй спросить что-то другое! 🐱"
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
-    # Проверяем, обращаются ли к коту
     if "кот" in message.text.lower():
-        # Убираем "кот" из запроса
         user_query = re.sub(r'[Кк]от[,\s]?', '', message.text).strip()
         
         if not user_query:
-            bot.reply_to(message, "Мяу? Я слушаю... Напиши что-нибудь, например:\n\n«Кот как дела?»\n«Кот посоветуй аниме»\n«Кот кто такой Пушкин?» 🐱")
+            bot.reply_to(message, "Мяу? Я слушаю... Напиши что-нибудь:\n\n«Кот привет»\n«Кот как дела?»\n«Кот посоветуй аниме»\n«Кот найди новости» 🐱")
             return
         
-        # Показываем, что бот печатает
         bot.send_chat_action(message.chat.id, "typing")
         
-        # Определяем, нужен ли поиск в интернете
         if need_search(user_query):
-            # Нужен поиск
-            status_msg = bot.send_message(message.chat.id, "🔍 Мяу... ищу информацию в интернете...")
+            status_msg = bot.send_message(message.chat.id, "🔍 Мяу... ищу в интернете...")
             search_results = search_web(user_query)
-            bot.edit_message_text("💭 Мяу... обрабатываю информацию...", message.chat.id, status_msg.message_id)
+            bot.edit_message_text("💭 Мяу... обрабатываю...", message.chat.id, status_msg.message_id)
             answer = ask_gigachat(user_query, search_results)
             bot.delete_message(message.chat.id, status_msg.message_id)
         else:
-            # Простой разговор без поиска
-            status_msg = bot.send_message(message.chat.id, "💭 Мяу... думаю...")
             answer = ask_gigachat(user_query, None)
-            bot.delete_message(message.chat.id, status_msg.message_id)
         
-        # Отправляем ответ
         bot.reply_to(message, answer)
 
 if __name__ == "__main__":
     print("=" * 50)
     print("🐱 КОТ-БОТ ЗАПУЩЕН!")
     print("=" * 50)
-    print("Бот отвечает только на русском языке 🐱")
-    print("На простые вопросы отвечает без поиска")
-    print("На сложные вопросы ищет в интернете")
+    print("Бот: @kot_helper_bot")
+    print("Поиск в интернете работает ТОЛЬКО если:")
+    print("- Сказать 'найди' или 'поищи'")
+    print("- Спросить с вопросительным словом")
     print("=" * 50)
     bot.infinity_polling()
