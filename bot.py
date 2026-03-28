@@ -6,7 +6,7 @@ from collections import defaultdict
 from openai import OpenAI
 
 TELEGRAM_TOKEN = "8785895690:AAFjNx1sMzJvjPgo6G5Qe-qSz5-E4QkN1_A"
-NAGA_API_KEY = "ng-1l2GbngFEcAClJs0QylQgjlcXm215HTf"
+NAGA_API_KEY = "ng-NroR3ZWZYNeUuMhMJSD1A1wrGDDzwUnM"
 NAGA_MODEL = "gpt-4o-mini"
 SEARXNG_URL = "https://searxng-railway-production-6f14.up.railway.app/search"
 
@@ -16,7 +16,7 @@ client = OpenAI(base_url="https://api.naga.ac/v1", api_key=NAGA_API_KEY)
 user_memory = defaultdict(list)
 MAX_MEMORY = 10
 
-SYSTEM_PROMPT = """Ты кот-помощник по имени Кот. Отвечай дружелюбно на русском языке.
+SYSTEM_PROMPT = """Ты — кот-помощник по имени Кот. Отвечай дружелюбно на русском языке.
 
 Правила:
 1. Отвечай на русском языке
@@ -42,38 +42,58 @@ def clear_memory(user_id):
 
 def search_web(query):
     try:
+        print(f"🔍 Поиск: {query}")
         response = requests.get(SEARXNG_URL, params={
             "q": query,
             "format": "json",
             "language": "ru",
             "limit": 5
         }, timeout=15)
+        
         if response.status_code == 200:
-            results = response.json().get("results", [])
+            data = response.json()
+            results = data.get("results", [])
             if results:
+                print(f"✅ Найдено {len(results)} результатов")
                 return [{
                     "title": r.get("title", "Без названия"),
                     "url": r.get("url", ""),
                     "content": r.get("content", "")[:500]
                 } for r in results[:5]]
+        return None
     except Exception as e:
         print(f"Ошибка поиска: {e}")
-    return None
+        return None
 
 
-def ask_ai(question, user_id, search_results=None, include_links=False):
+def ask_naga(question, user_id, search_results=None, include_links=False):
     try:
         history = get_user_memory(user_id)
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        messages.extend(history[-6:])
-
+        
+        for msg in history[-6:]:
+            messages.append(msg)
+        
         if search_results:
             context = "\n\n".join([
                 f"📌 {r['title']}\n{r['content']}" for r in search_results[:3]
             ])
-            suffix = "В конце добавь ссылки на источники." if include_links else "НЕ добавляй ссылки, только текст ответа."
-            enhanced = f"{question}\n\nИнформация из интернета:\n{context}\n\nОтветь кратко на основе этой информации. {suffix}"
-            messages.append({"role": "user", "content": enhanced})
+            
+            if include_links:
+                enhanced_question = f"""{question}
+
+Информация из интернета:
+{context}
+
+Ответь кратко на основе этой информации. В конце добавь ссылки на источники."""
+            else:
+                enhanced_question = f"""{question}
+
+Информация из интернета:
+{context}
+
+Ответь кратко на основе этой информации. НЕ добавляй ссылки, только текст ответа."""
+            messages.append({"role": "user", "content": enhanced_question})
         else:
             messages.append({"role": "user", "content": question})
 
@@ -83,18 +103,19 @@ def ask_ai(question, user_id, search_results=None, include_links=False):
             max_tokens=500,
             temperature=0.7
         )
+        
         answer = response.choices[0].message.content
-
+        
         add_to_memory(user_id, "user", question)
         add_to_memory(user_id, "assistant", answer)
-
+        
         if include_links and search_results:
             links = "\n\n📌 Источники:\n" + "\n".join([r["url"] for r in search_results[:2]])
             return answer + links
         return answer
 
     except Exception as e:
-        print(f"Ошибка AI: {e}")
+        print(f"❌ Ошибка Naga: {e}")
         return fallback_response(question, user_id, search_results, include_links)
 
 
@@ -132,7 +153,7 @@ def fallback_response(question, user_id, search_results=None, include_links=Fals
     elif "аниме" in q or "посоветуй" in q:
         return "Мяу! Советую:\n\n🎬 Киберпанк: Бегущие по краю\n🎬 Фрирен\n🎬 Дандадан\n\nПриятного просмотра! 🐱"
     elif "кто ты" in q:
-        return "Мяу! Я Кот — твой пушистый помощник!\n\nУмею искать в интернете:\n• «Котопоиск что-то» — без ссылок\n• «Котопоиск +ссылка что-то» — со ссылками 🐱"
+        return "Мяу! Я Кот — твой пушистый помощник! Использую Naga AI (GPT-4o-mini) 🐱"
     elif "что ты умеешь" in q:
         return "Мяу! Я умею:\n• Общаться 💬\n• Советовать аниме 🎬\n• Запоминать разговор 🧠\n• Искать в интернете 🔍\n\nПоиск:\n• «Котопоиск новости» — без ссылок\n• «Котопоиск +ссылка новости» — со ссылками 🐱"
     elif "спасибо" in q:
@@ -140,68 +161,66 @@ def fallback_response(question, user_id, search_results=None, include_links=Fals
     elif "пока" in q:
         return "Мяу! Пока-пока! Заходи ещё 🐱👋"
     else:
-        return "Мяу... Я не понял. Напиши:\n• «Кот привет»\n• «Кот посоветуй аниме»\n• «Котопоиск новости»\n• «Котопоиск +ссылка новости»\n• «Кот что я говорил» 🐱"
+        return f"Мяу... Я не понял. Напиши:\n• «Кот привет»\n• «Кот посоветуй аниме»\n• «Котопоиск новости»\n• «Кот что я говорил» 🐱"
 
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     user_id = message.from_user.id
-    text = message.text or ""
-    text_lower = text.lower()
-    is_reply_to_bot = (
-        message.reply_to_message and
-        message.reply_to_message.from_user.id == bot.get_me().id
-    )
-
+    is_reply_to_bot = (message.reply_to_message and message.reply_to_message.from_user.id == bot.get_me().id)
+    
+    text_lower = message.text.lower()
+    
     if "котопоиск" in text_lower:
         include_links = "+ссылка" in text_lower
+        
         user_query = re.sub(r'котопоиск|\+ссылка', '', text_lower).strip()
-
+        
         if not user_query:
             bot.reply_to(message, "Мяу! Напиши что искать после «Котопоиск», например:\n\n«Котопоиск новости» — без ссылок\n«Котопоиск +ссылка новости» — со ссылками 🔍🐱")
             return
-
+        
         bot.send_chat_action(message.chat.id, "typing")
         status_msg = bot.send_message(message.chat.id, "🔍 Мяу... ищу в интернете...")
         search_results = search_web(user_query)
-
+        
         if search_results:
             bot.edit_message_text("💭 Мяу... обрабатываю...", message.chat.id, status_msg.message_id)
-            answer = ask_ai(user_query, user_id, search_results, include_links)
+            answer = ask_naga(user_query, user_id, search_results, include_links)
             bot.delete_message(message.chat.id, status_msg.message_id)
         else:
             bot.edit_message_text("😿 Мяу... ничего не нашёл. Попробуй переформулировать запрос!", message.chat.id, status_msg.message_id)
             time.sleep(2)
             bot.delete_message(message.chat.id, status_msg.message_id)
             answer = "Мяу... Ничего не нашёл по этому запросу. Попробуй спросить по-другому! 🐱"
-
+        
         bot.reply_to(message, answer)
         return
-
+    
     if "кот" in text_lower or is_reply_to_bot:
         if is_reply_to_bot and "кот" not in text_lower:
-            user_query = text.strip()
+            user_query = message.text.strip()
         else:
-            user_query = re.sub(r'[Кк]от[,\s]?', '', text).strip()
-
+            user_query = re.sub(r'[Кк]от[,\s]?', '', message.text).strip()
+        
         if not user_query:
             bot.reply_to(message, "Мяу? Я слушаю... Напиши что-нибудь, например:\n\n«Кот привет»\n«Кот как дела?»\n«Кот посоветуй аниме»\n«Котопоиск новости»\n«Кот что я говорил» 🐱")
             return
-
+        
         bot.send_chat_action(message.chat.id, "typing")
-        answer = ask_ai(user_query, user_id)
+        answer = ask_naga(user_query, user_id, None, False)
         bot.reply_to(message, answer)
 
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("🐱 КОТ-БОТ ЗАПУЩЕН!")
+    print("🐱 КОТ-БОТ С NAGA AI ЗАПУЩЕН!")
     print("=" * 50)
     print(f"Бот: @{bot.get_me().username}")
     print(f"Модель: {NAGA_MODEL}")
     print("\nПоиск в интернете:")
-    print("• «Котопоиск что-то» — без ссылок")
-    print("• «Котопоиск +ссылка что-то» — со ссылками")
+    print("• «Котопоиск что-то» — ответ без ссылок")
+    print("• «Котопоиск +ссылка что-то» — ответ со ссылками")
     print("\nОбычное общение:")
     print("• «Кот привет» — общение")
     print("• «Кот посоветуй аниме» — аниме")
