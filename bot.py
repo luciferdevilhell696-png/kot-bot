@@ -53,7 +53,7 @@ def search_web(query):
 
 def ask_kimi(question, user_id, search_results=None, include_links=False):
     try:
-        url = "https://api.moonshot.ai/v1/chat/completions"
+        url = "https://api.moonshot.cn/v1/chat/completions"
         
         headers = {
             "Authorization": f"Bearer {KIMI_API_KEY}",
@@ -100,14 +100,15 @@ def ask_kimi(question, user_id, search_results=None, include_links=False):
         
         messages.append({"role": "user", "content": enhanced_question})
         
+        # ИСПРАВЛЕНО: используем официальную модель Moonshot
         payload = {
-            "model": "kimi-k2.5",
+            "model": "moonshot-v1-8k",  # или moonshot-v1-32k, moonshot-v1-128k
             "messages": messages,
             "temperature": 0.7,
             "max_tokens": 500
         }
         
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response = requests.post(url, headers=headers, json=payload, timeout=60)  # увеличил таймаут
         
         if response.status_code == 200:
             data = response.json()
@@ -121,7 +122,7 @@ def ask_kimi(question, user_id, search_results=None, include_links=False):
                 return answer + links
             return answer
         else:
-            print(f"❌ Ошибка Kimi: {response.status_code}")
+            print(f"❌ Ошибка Kimi: {response.status_code} - {response.text}")
             return fallback_response(question, user_id, search_results, include_links)
             
     except Exception as e:
