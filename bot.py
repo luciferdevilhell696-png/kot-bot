@@ -9,9 +9,13 @@ TELEGRAM_TOKEN = "8785895690:AAFjNx1sMzJvjPgo6G5Qe-qSz5-E4QkN1_A"
 MISTRAL_API_KEY = "I9PvXEOaGCsaAvjfMcPLSF0P5FrdmQJ9"
 SEARXNG_URL = "https://searxng-railway-production-6f14.up.railway.app/search"
 
+# 👇 ТВОЙ TELEGRAM ID (только ты можешь усыплять кота)
+MASTER_USER_ID = 5939413307
+
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 user_memory = defaultdict(list)
+user_sleeping = defaultdict(bool)
 MAX_MEMORY = 20
 
 SYSTEM_PROMPT = """Ты — кот-помощник по имени Кот. Ты дружелюбный, но отвечаешь КОРОТКО.
@@ -22,8 +26,7 @@ SYSTEM_PROMPT = """Ты — кот-помощник по имени Кот. Ты
 3. Пример: «Клинок, рассекающий демонов» (Demon Slayer)
 4. Высказывай своё мнение, но лаконично
 5. В конце каждого сообщения ОБЯЗАТЕЛЬНО добавляй "мяу 🐱"
-6. Не расписывай длинные списки, если просят топ — просто перечисли 3-5 пунктов кратко
-7. Будь живым и эмоциональным, но НЕ многословным"""
+6. Будь живым и эмоциональным, но НЕ многословным"""
 
 def add_to_memory(user_id, role, content):
     user_memory[user_id].append({"role": role, "content": content})
@@ -36,6 +39,9 @@ def clear_memory(user_id):
 
 def get_user_memory(user_id):
     return user_memory[user_id]
+
+def is_master(user_id):
+    return user_id == MASTER_USER_ID
 
 def search_web(query):
     try:
@@ -113,7 +119,6 @@ def ask_mistral(question, user_id, search_results=None, include_links=False):
             data = response.json()
             answer = data['choices'][0]['message']['content']
             
-            # Если в ответе нет "мяу", добавляем
             if "мяу" not in answer.lower():
                 answer = answer.rstrip() + " мяу 🐱"
             
@@ -187,7 +192,8 @@ def fallback_response(question, user_id, search_results=None, include_links=Fals
 • Болтать как друг
 • Искать в интернете: «Котопоиск что-то»
 • Советовать аниме
-• Запоминать наши разговоры
+• Запоминать разговоры
+• А ещё могу спать, если скажешь «Кот спать» 😴
 
 Спрашивай что хочешь! мяу 🐱"""
     elif "спасибо" in q:
@@ -206,10 +212,51 @@ def fallback_response(question, user_id, search_results=None, include_links=Fals
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     user_id = message.from_user.id
+    text = message.text or ""
+    text_lower = text.lower()
     is_reply_to_bot = (message.reply_to_message and message.reply_to_message.from_user.id == bot.get_me().id)
     
-    text_lower = message.text.lower()
+    # Команда "мой айди" — покажет ID (для настройки)
+    if "мой айди" in text_lower or "мой id" in text_lower:
+        bot.reply_to(message, f"Твой Telegram ID: `{user_id}`\n\nЭтот ID нужно вставить в код вместо MASTER_USER_ID, чтобы только ты мог усыплять кота! мяу 🐱", parse_mode="Markdown")
+        return
     
+    # Команды сна и пробуждения (только для хозяина)
+    if "кот спать" in text_lower:
+        if is_master(user_id):
+            user_sleeping[user_id] = True
+            bot.reply_to(message, random.choice([
+                "Мяу-мяу... Спокойной ночи, хозяин... 😴 мяу 🐱",
+                "Зеваю... Укладываюсь спать... Мур-мяу... 😴 мяу 🐱",
+                "Спатки? Хорошо... Пушистых снов, хозяин... 😴 мяу 🐱"
+            ]))
+        else:
+            bot.reply_to(message, "Мяу... Только мой хозяин может меня усыплять! 😾 мяу 🐱")
+        return
+    
+    if "кот проснись" in text_lower:
+        if is_master(user_id):
+            user_sleeping[user_id] = False
+            bot.reply_to(message, random.choice([
+                "Мяу-мяу! Доброе утро, хозяин! Выспался отлично! ☀️ мяу 🐱",
+                "Мур... уже утро? Потягушки! Доброе утро! 😸 мяу 🐱",
+                "Проснулся! Слышу голос хозяина! Чем займёмся? мяу 🐱"
+            ]))
+        else:
+            bot.reply_to(message, "Мяу... Только мой хозяин может меня будить! 😾 мяу 🐱")
+        return
+    
+    # Если кот спит — не отвечаем на другие сообщения
+    if user_sleeping[user_id]:
+        if random.random() < 0.1:
+            bot.reply_to(message, random.choice([
+                "Мур... сплю... не мешай... 😴 мяу",
+                "Ззз... позже... мяу... 😴",
+                "Храп-храп... мяу... 😴"
+            ]))
+        return
+    
+    # Обработка остальных команд (когда кот бодрствует)
     if "котопоиск" in text_lower:
         include_links = "+ссылка" in text_lower
         user_query = re.sub(r'котопоиск|\+ссылка', '', text_lower).strip()
@@ -237,12 +284,12 @@ def handle_message(message):
     
     if "кот" in text_lower or is_reply_to_bot:
         if is_reply_to_bot and "кот" not in text_lower:
-            user_query = message.text.strip()
+            user_query = text.strip()
         else:
-            user_query = re.sub(r'[Кк]от[,\s]?', '', message.text).strip()
+            user_query = re.sub(r'[Кк]от[,\s]?', '', text).strip()
         
         if not user_query:
-            bot.reply_to(message, "Мяу? Я слушаю! 😸\n\nНапиши что-нибудь:\n• Кот привет\n• Кот посоветуй аниме\n• Котопоиск новости\n• Кот что я говорил\n\nЖду! мяу 🐱")
+            bot.reply_to(message, "Мяу? Я слушаю! 😸\n\nНапиши что-нибудь:\n• Кот привет\n• Кот посоветуй аниме\n• Котопоиск новости\n• Кот что я говорил\n• мой айди — узнать свой ID\n\nЕсли хочешь спать — скажи «Кот спать» 😴\n\nЖду! мяу 🐱")
             return
         
         bot.send_chat_action(message.chat.id, "typing")
@@ -254,7 +301,12 @@ if __name__ == "__main__":
     print("🐱 КОТ-ДРУГ ЗАПУЩЕН!")
     print("=" * 50)
     print(f"Бот: @{bot.get_me().username}")
-    print("Кот отвечает КОРОТКО и использует русские названия аниме!")
+    print(f"Хозяин ID: {MASTER_USER_ID}")
+    print("\nКоманды только для хозяина:")
+    print("• «Кот спать» — кот засыпает 😴")
+    print("• «Кот проснись» — кот просыпается ☀️")
+    print("\nДля всех:")
+    print("• «мой айди» — показать свой Telegram ID")
     print("=" * 50)
     
     while True:
