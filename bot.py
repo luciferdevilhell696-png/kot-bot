@@ -9,14 +9,16 @@ TELEGRAM_TOKEN = "8785895690:AAFjNx1sMzJvjPgo6G5Qe-qSz5-E4QkN1_A"
 MISTRAL_API_KEY = "I9PvXEOaGCsaAvjfMcPLSF0P5FrdmQJ9"
 SEARXNG_URL = "https://searxng-railway-production-6f14.up.railway.app/search"
 
-# 👇 ТВОЙ TELEGRAM ID (только ты можешь усыплять кота)
+# ТВОЙ TELEGRAM ID (только ты можешь усыплять и будить кота)
 MASTER_USER_ID = 5939413307
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 user_memory = defaultdict(list)
-user_sleeping = defaultdict(bool)
 MAX_MEMORY = 20
+
+# ГЛОБАЛЬНЫЙ режим сна для всех пользователей
+is_sleeping = False
 
 SYSTEM_PROMPT = """Ты — кот-помощник по имени Кот. Ты дружелюбный, но отвечаешь КОРОТКО.
 
@@ -193,7 +195,7 @@ def fallback_response(question, user_id, search_results=None, include_links=Fals
 • Искать в интернете: «Котопоиск что-то»
 • Советовать аниме
 • Запоминать разговоры
-• А ещё могу спать, если скажешь «Кот спать» 😴
+• А ещё могу спать, если хозяин скажет «Кот спать» 😴
 
 Спрашивай что хочешь! мяу 🐱"""
     elif "спасибо" in q:
@@ -211,24 +213,26 @@ def fallback_response(question, user_id, search_results=None, include_links=Fals
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
+    global is_sleeping
+    
     user_id = message.from_user.id
     text = message.text or ""
     text_lower = text.lower()
     is_reply_to_bot = (message.reply_to_message and message.reply_to_message.from_user.id == bot.get_me().id)
     
-    # Команда "мой айди" — покажет ID (для настройки)
+    # Команда "мой айди" — покажет ID
     if "мой айди" in text_lower or "мой id" in text_lower:
-        bot.reply_to(message, f"Твой Telegram ID: `{user_id}`\n\nЭтот ID нужно вставить в код вместо MASTER_USER_ID, чтобы только ты мог усыплять кота! мяу 🐱", parse_mode="Markdown")
+        bot.reply_to(message, f"Твой Telegram ID: `{user_id}`\n\nЭтот ID нужно вставить в код, чтобы стать хозяином! мяу 🐱", parse_mode="Markdown")
         return
     
-    # Команды сна и пробуждения (только для хозяина)
+    # Команды сна и пробуждения (только для хозяина, ГЛОБАЛЬНЫЕ)
     if "кот спать" in text_lower:
         if is_master(user_id):
-            user_sleeping[user_id] = True
+            is_sleeping = True
             bot.reply_to(message, random.choice([
-                "Мяу-мяу... Спокойной ночи, хозяин... 😴 мяу 🐱",
-                "Зеваю... Укладываюсь спать... Мур-мяу... 😴 мяу 🐱",
-                "Спатки? Хорошо... Пушистых снов, хозяин... 😴 мяу 🐱"
+                "Мяу-мяу... Спокойной ночи всем! 😴 Кот уснул... мяу 🐱",
+                "Зеваю... Укладываюсь спать... Никого не слушаю до утра... 😴 мяу 🐱",
+                "Спатки? Хорошо... Всем спокойных снов... Кот ушёл в страну снов... 😴 мяу 🐱"
             ]))
         else:
             bot.reply_to(message, "Мяу... Только мой хозяин может меня усыплять! 😾 мяу 🐱")
@@ -236,23 +240,23 @@ def handle_message(message):
     
     if "кот проснись" in text_lower:
         if is_master(user_id):
-            user_sleeping[user_id] = False
+            is_sleeping = False
             bot.reply_to(message, random.choice([
-                "Мяу-мяу! Доброе утро, хозяин! Выспался отлично! ☀️ мяу 🐱",
-                "Мур... уже утро? Потягушки! Доброе утро! 😸 мяу 🐱",
-                "Проснулся! Слышу голос хозяина! Чем займёмся? мяу 🐱"
+                "Мяу-мяу! Доброе утро всем! Кот проснулся! ☀️ мяу 🐱",
+                "Мур... уже утро? Потягушки! Всем доброе утро! 😸 мяу 🐱",
+                "Проснулся! Слышу голос хозяина! Всем привет! мяу 🐱"
             ]))
         else:
             bot.reply_to(message, "Мяу... Только мой хозяин может меня будить! 😾 мяу 🐱")
         return
     
-    # Если кот спит — не отвечаем на другие сообщения
-    if user_sleeping[user_id]:
-        if random.random() < 0.1:
+    # Если кот спит ГЛОБАЛЬНО — не отвечаем никому
+    if is_sleeping:
+        if random.random() < 0.1:  # 10% шанс ответить во сне
             bot.reply_to(message, random.choice([
                 "Мур... сплю... не мешай... 😴 мяу",
-                "Ззз... позже... мяу... 😴",
-                "Храп-храп... мяу... 😴"
+                "Ззз... позже... кот спит... 😴 мяу",
+                "Храп-храп... утром приходи... 😴 мяу"
             ]))
         return
     
@@ -289,7 +293,7 @@ def handle_message(message):
             user_query = re.sub(r'[Кк]от[,\s]?', '', text).strip()
         
         if not user_query:
-            bot.reply_to(message, "Мяу? Я слушаю! 😸\n\nНапиши что-нибудь:\n• Кот привет\n• Кот посоветуй аниме\n• Котопоиск новости\n• Кот что я говорил\n• мой айди — узнать свой ID\n\nЕсли хочешь спать — скажи «Кот спать» 😴\n\nЖду! мяу 🐱")
+            bot.reply_to(message, "Мяу? Я слушаю! 😸\n\nНапиши что-нибудь:\n• Кот привет\n• Кот посоветуй аниме\n• Котопоиск новости\n• Кот что я говорил\n• мой айди — узнать свой ID\n\nЕсли хочешь усыпить кота — скажи «Кот спать» 😴\n\nЖду! мяу 🐱")
             return
         
         bot.send_chat_action(message.chat.id, "typing")
@@ -298,15 +302,14 @@ def handle_message(message):
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("🐱 КОТ-ДРУГ ЗАПУЩЕН!")
+    print("🐱 КОТ-ДРУГ С ГЛОБАЛЬНЫМ РЕЖИМОМ СНА!")
     print("=" * 50)
     print(f"Бот: @{bot.get_me().username}")
     print(f"Хозяин ID: {MASTER_USER_ID}")
-    print("\nКоманды только для хозяина:")
-    print("• «Кот спать» — кот засыпает 😴")
-    print("• «Кот проснись» — кот просыпается ☀️")
-    print("\nДля всех:")
-    print("• «мой айди» — показать свой Telegram ID")
+    print("\nКОМАНДЫ (только для хозяина):")
+    print("• «Кот спать» — кот засыпает для ВСЕХ пользователей 😴")
+    print("• «Кот проснись» — кот просыпается для ВСЕХ ☀️")
+    print("\nКогда кот спит — никто не может с ним общаться!")
     print("=" * 50)
     
     while True:
