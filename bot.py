@@ -4,21 +4,17 @@ import re
 import uuid
 import time
 
-# ========== ТВОИ ДАННЫЕ ==========
 TELEGRAM_TOKEN = "8785895690:AAFjNx1sMzJvjPgo6G5Qe-qSz5-E4QkN1_A"
 GIGACHAT_AUTH_KEY = "MDE5ZDMzOTYtMjhjYy03M2YzLWJlNGItOTAzYTZiYzI3YzA0OmQzYTk3YzdmLWRlZDMtNDE2ZS04NGIzLTg1YmU2OWJjZTg3OA=="
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-# Храним токен доступа
 access_token = None
 token_expires_at = 0
 
 def get_access_token():
-    """Получает Access Token для GigaChat"""
     global access_token, token_expires_at
     
-    # Если токен ещё не истёк (30 минут)
     if access_token and time.time() < token_expires_at:
         return access_token
     
@@ -41,12 +37,11 @@ def get_access_token():
         if response.status_code == 200:
             data = response.json()
             access_token = data.get('access_token')
-            # Токен живёт 30 минут
-            token_expires_at = time.time() + 25 * 60  # 25 минут для запаса
+            token_expires_at = time.time() + 25 * 60
             print("✅ Получен новый Access Token")
             return access_token
         else:
-            print(f"❌ Ошибка получения токена: {response.status_code} - {response.text}")
+            print(f"❌ Ошибка получения токена: {response.status_code}")
             return None
             
     except Exception as e:
@@ -54,9 +49,7 @@ def get_access_token():
         return None
 
 def ask_gigachat(question):
-    """Отправляет вопрос в GigaChat"""
     try:
-        # Получаем токен
         token = get_access_token()
         if not token:
             return fallback_response(question)
@@ -95,7 +88,7 @@ def ask_gigachat(question):
             answer = data['choices'][0]['message']['content']
             return answer
         else:
-            print(f"❌ Ошибка GigaChat: {response.status_code} - {response.text}")
+            print(f"❌ Ошибка GigaChat: {response.status_code}")
             return fallback_response(question)
             
     except Exception as e:
@@ -103,7 +96,6 @@ def ask_gigachat(question):
         return fallback_response(question)
 
 def fallback_response(question):
-    """Запасные ответы"""
     q = question.lower()
     
     if "привет" in q:
@@ -111,7 +103,7 @@ def fallback_response(question):
     elif "как дела" in q:
         return "Мурлычу отлично! Греюсь на солнышке ☀️🐱"
     elif "аниме" in q or "посоветуй" in q:
-        return "Мяу! Советую:\n\n🎬 «Киберпанк: Бегущие по краю»\n🎬 «Фрирен»\n🎬 «Дандадан»\n\nПриятного просмотра! 🐱"
+        return "Мяу! Советую:\n\n🎬 Киберпанк: Бегущие по краю\n🎬 Фрирен\n🎬 Дандадан\n\nПриятного просмотра! 🐱"
     elif "кто ты" in q:
         return "Мяу! Я Кот — твой пушистый помощник! 🐱"
     elif "что ты умеешь" in q:
@@ -125,18 +117,24 @@ def fallback_response(question):
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
-    if "кот" in message.text.lower():
-        user_query = re.sub(r'[Кк]от[,\s]?', '', message.text).strip()
+    # Проверяем, есть ли слово "кот" или это ответ на сообщение бота
+    is_reply_to_bot = (message.reply_to_message and message.reply_to_message.from_user.id == bot.get_me().id)
+    
+    if "кот" in message.text.lower() or is_reply_to_bot:
+        user_query = message.text.strip()
+        
+        # Если это ответ на бота, убираем упоминание
+        if is_reply_to_bot and "кот" not in user_query.lower():
+            user_query = user_query
+        else:
+            user_query = re.sub(r'[Кк]от[,\s]?', '', user_query).strip()
         
         if not user_query:
             bot.reply_to(message, "Мяу? Я слушаю... Напиши что-нибудь, например:\n\n«Кот привет»\n«Кот как дела?»\n«Кот посоветуй аниме» 🐱")
             return
         
         bot.send_chat_action(message.chat.id, "typing")
-        
-        # Пробуем получить ответ от GigaChat
         answer = ask_gigachat(user_query)
-        
         bot.reply_to(message, answer)
 
 if __name__ == "__main__":
@@ -144,6 +142,8 @@ if __name__ == "__main__":
     print("🐱 КОТ-БОТ С GIGACHAT ЗАПУЩЕН!")
     print("=" * 50)
     print(f"Бот: @{bot.get_me().username}")
-    print("Жду когда меня позовут словом 'Кот'...")
+    print("Реагирует на:")
+    print("1. Сообщения со словом 'Кот'")
+    print("2. Ответы на свои сообщения (нажми 'Ответить' на сообщение бота)")
     print("=" * 50)
     bot.infinity_polling()
