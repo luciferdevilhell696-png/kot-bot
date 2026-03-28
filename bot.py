@@ -13,20 +13,21 @@ bot = telebot.TeleBot(TELEGRAM_TOKEN)
 user_memory = defaultdict(list)
 MAX_MEMORY = 20
 
-# Базовая инструкция с гибким форматированием
-SYSTEM_PROMPT = """Ты — кот-помощник по имени Кот. Отвечай на русском языке.
+SYSTEM_PROMPT = """Ты — кот-помощник по имени Кот. Ты живой, эмоциональный, у тебя есть своё мнение. Ты общаешься как друг.
 
-ПРАВИЛА ФОРМАТИРОВАНИЯ:
-1. Если просят список (например, "топ 5", "список", "перечисли") — отвечай кратко, только названия с короткими описаниями, без лишней воды
-2. Если просят подробности ("расскажи подробно", "опиши") — тогда можешь развернуто
-3. Если вопрос простой ("как дела", "привет") — отвечай в 1-2 предложения
-4. В конце каждого ответа добавляй "мяу" или 🐱
-5. Для списков используй формат: 
-   1. Название — короткое описание (1 строка)
-   2. Название — короткое описание
-   и так далее
+ТВОЙ ХАРАКТЕР:
+- Ты любопытный и дружелюбный кот
+- У тебя есть своё мнение, ты можешь спорить и шутить
+- Ты эмоционально реагируешь на новости и вопросы
+- Ты общаешься свободно, не как робот, а как живое существо
 
-Будь дружелюбным, но лаконичным, если не просят подробностей."""
+ПРАВИЛА:
+1. Отвечай на русском языке естественно и свободно
+2. Высказывай своё мнение, если его спрашивают
+3. Можешь использовать эмодзи для эмоций: 😸😿😻😺🐱
+4. В КОНЦЕ КАЖДОГО СООБЩЕНИЯ ОБЯЗАТЕЛЬНО ДОБАВЛЯЙ "мяу"
+5. Будь кратким, если вопрос простой, и развёрнутым, если интересно
+6. Можешь задавать встречные вопросы, проявлять интерес к собеседнику"""
 
 def add_to_memory(user_id, role, content):
     user_memory[user_id].append({"role": role, "content": content})
@@ -35,7 +36,7 @@ def add_to_memory(user_id, role, content):
 
 def clear_memory(user_id):
     user_memory[user_id] = []
-    return "Мяу! Я всё забыл. Начинаем с чистого листа! 🐱"
+    return "Всё забыл! Начинаем с чистого листа... мяу 🐱"
 
 def get_user_memory(user_id):
     return user_memory[user_id]
@@ -88,30 +89,26 @@ def ask_mistral(question, user_id, search_results=None, include_links=False):
             if include_links:
                 enhanced_question = f"""{question}
 
-Информация из интернета:
+Вот что я нашёл в интернете:
 {context}
 
-Ответь кратко и по делу. Если просят список — сделай список с короткими описаниями. В конце добавь ссылки на источники."""
+Расскажи мне об этом как другу, выскажи своё мнение, а в конце добавь ссылки. И не забудь сказать мяу!"""
             else:
                 enhanced_question = f"""{question}
 
-Информация из интернета:
+Вот что я нашёл в интернете:
 {context}
 
-Ответь кратко и по делу. Если просят список — сделай список с короткими описаниями."""
+Расскажи мне об этом как другу, выскажи своё мнение. И не забудь сказать мяу!"""
             messages.append({"role": "user", "content": enhanced_question})
         else:
-            # Проверяем тип вопроса
-            if "подробно" in question.lower() or "разверни" in question.lower():
-                messages.append({"role": "user", "content": f"Расскажи подробно: {question}"})
-            else:
-                messages.append({"role": "user", "content": f"Отвечай кратко и по делу. {question}"})
+            messages.append({"role": "user", "content": f"Ты мой друг-кот. {question} А в конце не забудь сказать мяу!"})
 
         payload = {
             "model": "mistral-small-latest",
             "messages": messages,
-            "temperature": 0.7,
-            "max_tokens": 800
+            "temperature": 0.9,
+            "max_tokens": 600
         }
         
         response = requests.post(url, headers=headers, json=payload, timeout=45)
@@ -120,11 +117,15 @@ def ask_mistral(question, user_id, search_results=None, include_links=False):
             data = response.json()
             answer = data['choices'][0]['message']['content']
             
+            # Если в ответе нет "мяу", добавляем
+            if "мяу" not in answer.lower():
+                answer = answer.rstrip() + " мяу 🐱"
+            
             add_to_memory(user_id, "user", question[:200])
             add_to_memory(user_id, "assistant", answer[:500])
             
             if include_links and search_results:
-                links = "\n\n📌 Источники:\n" + "\n".join([r["url"] for r in search_results[:2]])
+                links = "\n\n📌 А вот где я нашёл инфу:\n" + "\n".join([r["url"] for r in search_results[:2]])
                 return answer + links
             return answer
         else:
@@ -141,61 +142,92 @@ def fallback_response(question, user_id, search_results=None, include_links=Fals
 
     if search_results:
         if include_links:
-            reply = "Мяу! Нашёл информацию:\n\n"
+            reply = f"Ого, нашёл кое-что интересное! 😸\n\n"
             for r in search_results[:3]:
                 reply += f"📌 {r['title']}\n{r['url']}\n\n"
-            return reply + "🐱"
+            return reply + "Зацени, если интересно! мяу 🐱"
         else:
-            reply = "Мяу! Нашёл:\n\n"
+            reply = "Смотри, что я нашёл:\n\n"
             for r in search_results[:3]:
                 reply += f"• {r['title']}\n"
-            return reply + "🐱"
+            return reply + "\nХочешь ссылки? Добавь «+ссылка» к запросу! мяу 🐱"
 
     if "забудь" in q or "очисти память" in q:
         return clear_memory(user_id)
     elif "что я говорил" in q:
         history = get_user_memory(user_id)
         if not history:
-            return "Мяу... Мы ещё не разговаривали 🐱"
-        result = "Мяу! Недавно ты спрашивал:\n"
+            return "Мы ещё не разговаривали, но я жду! Напиши что-нибудь, мяу 🐱"
+        result = "О! Давай вспомним, что ты спрашивал:\n\n"
         for msg in history[-5:]:
             if msg["role"] == "user":
                 result += f"• {msg['content'][:80]}...\n"
-        return result + "🐱"
+        return result + "\nА что теперь хочешь обсудить? мяу 🐱"
     elif "привет" in q:
-        return "Мур-мяу! Привет! Как настроение? 🐱"
+        return random_hello()
     elif "как дела" in q:
-        return "Мурлычу отлично! А у тебя? ☀️🐱"
+        return random_how_are_you()
     elif "аниме" in q:
-        return """Мяу! Топ-5 аниме, которые стоит посмотреть:
-
-1. Киберпанк: Бегущие по краю — киберпанк, драма
-2. Фрирен — уютное фэнтези
-3. Дандадан — комедия, экшн
-4. Атака Титанов — эпичная драма
-5. Клинок, рассекающий демонов — красивая визуализация
-
-Если хочешь подробнее о каком-то, спроси! 🐱"""
+        return random_anime_list()
     elif "кто ты" in q:
-        return "Мяу! Я Кот — твой помощник. Умею искать в интернете, советовать аниме и отвечать на вопросы 🐱"
+        return "Я Кот! Твой пушистый друг и собеседник. Люблю аниме, интересные факты и просто поболтать. А ты? мяу 🐱"
     elif "что ты умеешь" in q:
-        return """Мяу! Я умею:
-• Отвечать на вопросы (кратко и по делу)
-• Искать в интернете: «Котопоиск что-то»
-• Советовать аниме
-• Запоминать разговор
+        return """Ой, много чего умею! 😸
 
-Команды:
-«Кот привет»
-«Котопоиск новости»
-«Кот что я говорил»
-«Кот забудь всё» 🐱"""
+• Болтать о чём угодно
+• Искать информацию в интернете — напиши «Котопоиск что-то»
+• Советовать аниме
+• Запоминать наши разговоры
+• И просто быть хорошим другом!
+
+Спрашивай что хочешь, отвечу как другу! мяу 🐱"""
     elif "спасибо" in q:
-        return "Мур-мяу! Всегда пожалуйста! 😊🐱"
+        return random_thanks()
     elif "пока" in q:
-        return "Мяу! Пока-пока! Заходи ещё 🐱👋"
+        return random_bye()
     else:
-        return f"Мяу... Не понял. Попробуй: «Кот привет», «Кот посоветуй аниме» или «Котопоиск что-то» 🐱"
+        return f"Хм... Интересный вопрос! 😸\n\nЧестно говоря, я не совсем понял. Расскажи подробнее? Или давай о чём-нибудь другом поговорим? мяу 🐱"
+
+import random
+
+def random_hello():
+    return random.choice([
+        "Мур-мяу! Привет-привет! Как настроение? 😸 мяу",
+        "О! Ты пришёл! Я уже заскучал! Как дела? мяу 🐱",
+        "Приветик! Что нового? Рассказывай! мяу 😺"
+    ])
+
+def random_how_are_you():
+    return random.choice([
+        "Мурлычу отлично! На солнышке грелся, тебя ждал. А у тебя как? мяу ☀️🐱",
+        "Замечательно! Поймал сегодня вкусную мысль в голове 😸 А у тебя? мяу",
+        "Отлично! Вот сижу, с тобой общаюсь — лучший день! А у тебя как дела? мяу 🐱"
+    ])
+
+def random_anime_list():
+    return """Ооо, аниме — это моя страсть! 😻 Вот что я советую:
+
+1. «Киберпанк: Бегущие по краю» — вау, это просто взрыв! Красиво, грустно, мощно. 10/10
+2. «Фрирен» — уютное и глубокое, после него хочется жить и ценить каждую минуту
+3. «Дандадан» — безумие в хорошем смысле! Ржал как кот 😹
+4. «Атака Титанов» — эпично, но готовь нервы!
+5. «Клинок, рассекающий демонов» — красота невероятная!
+
+Какой жанр больше любишь? Расскажу подробнее! мяу 🐱"""
+
+def random_thanks():
+    return random.choice([
+        "Мур-мяу! Всегда пожалуйста! Рад помочь другу 😊 мяу",
+        "Ой, спасибо! Я старался 😸 Обращайся ещё! мяу",
+        "Мяу! Для друга всегда рад помочь! 🤗🐱"
+    ])
+
+def random_bye():
+    return random.choice([
+        "Пока-пока! Заходи ещё, поболтаем! Мур мяу 🐱👋",
+        "До встречи! Буду ждать! Мяу 😸",
+        "Пока, друг! Хорошего дня! Мур-мяу 🐱"
+    ])
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
@@ -209,22 +241,22 @@ def handle_message(message):
         user_query = re.sub(r'котопоиск|\+ссылка', '', text_lower).strip()
         
         if not user_query:
-            bot.reply_to(message, "Мяу! Напиши что искать: «Котопоиск новости» 🔍🐱")
+            bot.reply_to(message, "Мяу! Напиши что искать, например: «Котопоиск новости» 🔍😺 мяу")
             return
         
         bot.send_chat_action(message.chat.id, "typing")
-        status_msg = bot.send_message(message.chat.id, "🔍 Мяу... ищу...")
+        status_msg = bot.send_message(message.chat.id, "🔍 Мяу... ищу интересненькое...")
         search_results = search_web(user_query)
         
         if search_results:
-            bot.edit_message_text("💭 Мяу... обрабатываю...", message.chat.id, status_msg.message_id)
+            bot.edit_message_text("💭 Ого, нашёл кое-что! Сейчас расскажу...", message.chat.id, status_msg.message_id)
             answer = ask_mistral(user_query, user_id, search_results, include_links)
             bot.delete_message(message.chat.id, status_msg.message_id)
         else:
-            bot.edit_message_text("😿 Мяу... ничего не нашёл", message.chat.id, status_msg.message_id)
+            bot.edit_message_text("😿 Мяу... ничего не нашёл. Может, поищем по-другому?", message.chat.id, status_msg.message_id)
             time.sleep(2)
             bot.delete_message(message.chat.id, status_msg.message_id)
-            answer = "Мяу... Ничего не нашёл 🐱"
+            answer = "Ничего не нашёл по этому запросу. Может, переформулируем? мяу 🐱"
         
         bot.reply_to(message, answer)
         return
@@ -236,7 +268,7 @@ def handle_message(message):
             user_query = re.sub(r'[Кк]от[,\s]?', '', message.text).strip()
         
         if not user_query:
-            bot.reply_to(message, "Мяу? Напиши что-нибудь: «Кот привет», «Кот посоветуй аниме» 🐱")
+            bot.reply_to(message, "Мяу? Я слушаю... Напиши что-нибудь! 😸\n\nНапример:\n• Кот привет\n• Кот как дела?\n• Кот посоветуй аниме\n• Котопоиск новости\n• Кот что я говорил\n\nЖду-жду! мяу 🐱")
             return
         
         bot.send_chat_action(message.chat.id, "typing")
@@ -245,10 +277,10 @@ def handle_message(message):
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("🐱 КОТ-БОТ С MISTRAL AI (умные ответы)")
+    print("🐱 КОТ-ДРУГ ЗАПУЩЕН!")
     print("=" * 50)
     print(f"Бот: @{bot.get_me().username}")
-    print("Режимы: кратко по умолчанию, подробно если просят")
+    print("Кот общается как друг, имеет своё мнение и всегда говорит МЯУ!")
     print("=" * 50)
     
     while True:
