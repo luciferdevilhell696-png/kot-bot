@@ -4,17 +4,21 @@ import re
 import uuid
 import time
 
+# ========== ТВОИ ДАННЫЕ ==========
 TELEGRAM_TOKEN = "8785895690:AAFjNx1sMzJvjPgo6G5Qe-qSz5-E4QkN1_A"
 GIGACHAT_AUTH_KEY = "MDE5ZDMzOTYtMjhjYy03M2YzLWJlNGItOTAzYTZiYzI3YzA0OmQzYTk3YzdmLWRlZDMtNDE2ZS04NGIzLTg1YmU2OWJjZTg3OA=="
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
+# Храним токен доступа
 access_token = None
 token_expires_at = 0
 
 def get_access_token():
+    """Получает Access Token для GigaChat"""
     global access_token, token_expires_at
     
+    # Если токен ещё не истёк (30 минут)
     if access_token and time.time() < token_expires_at:
         return access_token
     
@@ -37,16 +41,22 @@ def get_access_token():
         if response.status_code == 200:
             data = response.json()
             access_token = data.get('access_token')
-            token_expires_at = time.time() + 25 * 60
+            # Токен живёт 30 минут
+            token_expires_at = time.time() + 25 * 60  # 25 минут для запаса
+            print("✅ Получен новый Access Token")
             return access_token
         else:
+            print(f"❌ Ошибка получения токена: {response.status_code} - {response.text}")
             return None
             
     except Exception as e:
+        print(f"❌ Ошибка: {e}")
         return None
 
 def ask_gigachat(question):
+    """Отправляет вопрос в GigaChat"""
     try:
+        # Получаем токен
         token = get_access_token()
         if not token:
             return fallback_response(question)
@@ -57,12 +67,15 @@ def ask_gigachat(question):
             "model": "GigaChat",
             "messages": [
                 {
-                    "role": "system",
-                    "content": "Ты кот-помощник. Отвечай на русском, добавляй мяу. Отвечай кратко."
-                },
-                {
                     "role": "user",
-                    "content": question
+                    "content": f"""Ты — кот-помощник по имени Кот. Отвечай дружелюбно.
+
+Правила:
+1. Отвечай на русском языке
+2. Добавляй "мяу" в конце
+3. Отвечай кратко (1-2 предложения)
+
+Вопрос: {question}"""
                 }
             ],
             "temperature": 0.7,
@@ -79,22 +92,26 @@ def ask_gigachat(question):
         
         if response.status_code == 200:
             data = response.json()
-            return data['choices'][0]['message']['content']
+            answer = data['choices'][0]['message']['content']
+            return answer
         else:
+            print(f"❌ Ошибка GigaChat: {response.status_code} - {response.text}")
             return fallback_response(question)
             
     except Exception as e:
+        print(f"❌ Ошибка: {e}")
         return fallback_response(question)
 
 def fallback_response(question):
+    """Запасные ответы"""
     q = question.lower()
     
     if "привет" in q:
         return "Мур-мяу! Приветствую, друг! Как настроение? 🐱"
-    elif "как дела" in q or "как ты" in q:
+    elif "как дела" in q:
         return "Мурлычу отлично! Греюсь на солнышке ☀️🐱"
     elif "аниме" in q or "посоветуй" in q:
-        return "Мяу! Советую:\n\n🎬 Киберпанк: Бегущие по краю\n🎬 Фрирен\n🎬 Дандадан\n\nПриятного просмотра! 🐱"
+        return "Мяу! Советую:\n\n🎬 «Киберпанк: Бегущие по краю»\n🎬 «Фрирен»\n🎬 «Дандадан»\n\nПриятного просмотра! 🐱"
     elif "кто ты" in q:
         return "Мяу! Я Кот — твой пушистый помощник! 🐱"
     elif "что ты умеешь" in q:
@@ -116,9 +133,17 @@ def handle_message(message):
             return
         
         bot.send_chat_action(message.chat.id, "typing")
+        
+        # Пробуем получить ответ от GigaChat
         answer = ask_gigachat(user_query)
+        
         bot.reply_to(message, answer)
 
 if __name__ == "__main__":
-    print("🐱 Кот-бот запущен!")
+    print("=" * 50)
+    print("🐱 КОТ-БОТ С GIGACHAT ЗАПУЩЕН!")
+    print("=" * 50)
+    print(f"Бот: @{bot.get_me().username}")
+    print("Жду когда меня позовут словом 'Кот'...")
+    print("=" * 50)
     bot.infinity_polling()
