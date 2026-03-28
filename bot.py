@@ -1,11 +1,9 @@
 import telebot
 import requests
-import json
 import re
-import time
 from gigachat import GigaChat
 
-# ========== ТВОИ ДАННЫЕ (СТАРЫЕ КЛЮЧИ - ВРЕМЕННО) ==========
+# ========== ТВОИ ДАННЫЕ ==========
 TELEGRAM_TOKEN = "8785895690:AAFjNx1sMzJvjPgo6G5Qe-qSz5-E4QkN1_A"
 SEARXNG_URL = "https://searxng-railway-production-6f14.up.railway.app/search"
 GIGACHAT_AUTH_KEY = "MDE5ZDMzOTYtMjhjYy03M2YzLWJlNGItOTAzYTZiYzI3YzA0OmQzYTk3YzdmLWRlZDMtNDE2ZS04NGIzLTg1YmU2OWJjZTg3OA=="
@@ -13,71 +11,43 @@ GIGACHAT_AUTH_KEY = "MDE5ZDMzOTYtMjhjYy03M2YzLWJlNGItOTAzYTZiYzI3YzA0OmQzYTk3Yzd
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 def search_web(query):
-    """Поиск в интернете через SearXNG"""
     try:
         response = requests.get(SEARXNG_URL, params={
             "q": query,
             "format": "json",
-            "categories": "general",
-            "limit": 5
-        }, timeout=15)
+            "limit": 3
+        }, timeout=10)
         
         if response.status_code == 200:
             data = response.json()
             results = data.get("results", [])
             if results:
-                return [{
-                    "title": r.get("title", "Без названия"),
-                    "url": r.get("url", ""),
-                    "content": r.get("content", "")[:500]
-                } for r in results[:5]]
+                return results[:3]
         return None
     except Exception as e:
-        print(f"Ошибка поиска: {e}")
+        print(f"Search error: {e}")
         return None
 
 def need_search(query):
-    """Определяет, нужен ли поиск в интернете"""
-    query_lower = query.lower()
+    q = query.lower()
     
-    # Слова, которые явно говорят "ищи в интернете"
-    search_keywords = ["найди", "поищи", "узнай", "найди мне", "поищи в интернете"]
-    for word in search_keywords:
-        if word in query_lower:
-            return True
+    if "найди" in q or "поищи" in q:
+        return True
     
-    # Если это запрос на аниме — НЕ ищем
-    anime_keywords = ["аниме", "посоветуй аниме", "какое аниме", "аниме посоветуй"]
-    for word in anime_keywords:
-        if word in query_lower:
-            return False
+    if any(word in q for word in ["аниме", "посоветуй аниме"]):
+        return False
     
-    # Если это приветствие или простой диалог — НЕ ищем
-    simple_questions = [
-        "привет", "здарова", "здравствуй", "hello", "hi",
-        "как дела", "как ты", "как сам", "как жизнь",
-        "что ты умеешь", "что можешь", "расскажи о себе",
-        "кто ты", "ты кто", "твое имя", "как тебя зовут",
-        "спасибо", "благодарю",
-        "пока", "до свидания", "покеда",
-        "что посмотреть", "посоветуй фильм", "кино посоветуй"
-    ]
+    simple = ["привет", "как дела", "что ты умеешь", "кто ты", "спасибо", "пока"]
+    if any(word in q for word in simple):
+        return False
     
-    for simple in simple_questions:
-        if simple in query_lower:
-            return False
-    
-    # Вопросительные слова — ищем
-    question_words = ["кто", "что", "где", "когда", "почему", "зачем", "какой", "сколько"]
-    for word in question_words:
-        if word in query_lower:
-            if "аниме" not in query_lower:
-                return True
+    question_words = ["кто", "что", "где", "когда", "почему"]
+    if any(word in q for word in question_words):
+        return True
     
     return False
 
 def ask_gigachat(question, search_results=None):
-    """Отправляет вопрос в GigaChat"""
     try:
         with GigaChat(
             credentials=GIGACHAT_AUTH_KEY,
@@ -87,84 +57,60 @@ def ask_gigachat(question, search_results=None):
         ) as client:
             
             if search_results:
-                context = "\n\n".join([
-                    f"📌 {r['title']}\n{r['content']}\n🔗 {r['url']}"
-                    for r in search_results[:3]
-                ])
-                prompt = f"""Ты — кот-помощник по имени Кот. Отвечай на вопросы пользователя, используя ТОЛЬКО информацию из источников ниже.
+                context = ""
+                for r in search_results[:2]:
+                    title = r.get("title", "")
+                    content = r.get("content", "")[:300]
+                    url = r.get("url", "")
+                    context += f"Источник: {title}\n{content}\nСсылка: {url}\n\n"
+                
+                prompt = f"""Ты кот-помощник. Ответь на вопрос, используя информацию ниже. Отвечай на русском языке.
 
 Вопрос: {question}
 
-Информация из интернета:
+Информация:
 {context}
 
-Правила:
-1. Отвечай кратко (2-3 предложения)
-2. Добавляй "мяу" или "мур"
-3. В конце поставь 🐱
-4. Обязательно отвечай на русском языке
-
-Ответ:"""
+Ответь кратко, добавь 🐱:"""
             else:
-                prompt = f"""Ты — кот-помощник по имени Кот. Отвечай дружелюбно и с юмором.
+                prompt = f"""Ты кот-помощник. Ответь дружелюбно на русском языке.
 
 Вопрос: {question}
 
-Правила:
-1. Отвечай кратко (1-2 предложения)
-2. Будь милым котом, добавляй "мяу" или "мур"
-3. В конце поставь 🐱
-4. НЕ ищи информацию в интернете, отвечай от себя
-5. Обязательно отвечай на русском языке
-
-Ответ:"""
+Ответь кратко, добавь 🐱:"""
             
             response = client.chat(prompt)
             answer = response.choices[0].message.content
             
             if search_results:
-                links = "\n\n📌 Исто
-SearXNG
-SearXNG
-searxng-railway-production-6f14.up.railway.app
-
-
-чники:\n" + "\n".join([r["url"] for r in search_results[:2]])
+                links = "\n\nИсточники:\n"
+                for r in search_results[:2]:
+                    links += f"{r.get('url', '')}\n"
                 return answer + links
             
             return answer
             
     except Exception as e:
-        print(f"Ошибка GigaChat: {e}")
+        print(f"GigaChat error: {e}")
         return fallback_response(question)
 
 def fallback_response(question):
-    """Запасные ответы"""
     q = question.lower()
     
     if "привет" in q:
-        return "Мур-мяу! Приветствую! Как настроение? 🐱"
-    
-    elif "как дела" in q or "как ты" in q:
-        return "Мурлычу отлично! Греюсь на солнышке ☀️🐱"
-    
-    elif "что ты умеешь" in q:
-        return "Мяу! Я умею:\n\n• Общаться 💬\n• Искать в интернете 🔍\n• Советовать аниме 🎬\n\nПросто спроси меня! 🐱"
-    
+        return "Мур-мяу! Привет! Как дела? 🐱"
+    elif "как дела" in q:
+        return "Мурлычу отлично! А у тебя? ☀️🐱"
     elif "аниме" in q or "посоветуй" in q:
-        return "Мяу! Советую посмотреть:\n\n🎬 «Киберпанк: Бегущие по краю»\n🎬 «Фрирен»\n🎬 «Дандадан»\n\nПриятного просмотра! 🐱"
-    
+        return "Мяу! Советую:\n• Киберпанк: Бегущие по краю\n• Фрирен\n• Дандадан 🎬🐱"
     elif "кто ты" in q:
-        return "Мяу! Я Кот — твой пушистый помощник! 🐱"
-    
+        return "Мяу! Я Кот - твой помощник! 🐱"
     elif "спасибо" in q:
-        return "Мур-мяу! Всегда пожалуйста! 😊🐱"
-    
+        return "Мур-мяу! Всегда рад помочь! 😊🐱"
     elif "пока" in q:
-        return "Мяу! Пока-пока! Заходи ещё 🐱👋"
-    
+        return "Мяу! Пока-пока! 👋🐱"
     else:
-        return f"Мяу... Я не понял вопрос. Попробуй спросить что-то другое! 🐱"
+        return f"Мяу... Не понял. Спроси что-то другое! 🐱"
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
@@ -172,16 +118,16 @@ def handle_message(message):
         user_query = re.sub(r'[Кк]от[,\s]?', '', message.text).strip()
         
         if not user_query:
-            bot.reply_to(message, "Мяу? Я слушаю... Напиши что-нибудь:\n\n«Кот привет»\n«Кот как дела?»\n«Кот посоветуй аниме»\n«Кот найди новости» 🐱")
+            bot.reply_to(message, "Мяу? Напиши что-нибудь, например:\n«Кот привет»\n«Кот как дела?»\n«Кот посоветуй аниме» 🐱")
             return
         
         bot.send_chat_action(message.chat.id, "typing")
         
         if need_search(user_query):
-            status_msg = bot.send_message(message.chat.id, "🔍 Мяу... ищу в интернете...")
-            search_results = search_web(user_query)
-            bot.edit_message_text("💭 Мяу... обрабатываю...", message.chat.id, status_msg.message_id)
-            answer = ask_gigachat(user_query, search_results)
+            status_msg = bot.send_message(message.chat.id, "🔍 Мяу... ищу...")
+            results = search_web(user_query)
+            bot.edit_message_text("💭 Мяу... думаю...", message.chat.id, status_msg.message_id)
+            answer = ask_gigachat(user_query, results)
             bot.delete_message(message.chat.id, status_msg.message_id)
         else:
             answer = ask_gigachat(user_query, None)
@@ -189,12 +135,5 @@ def handle_message(message):
         bot.reply_to(message, answer)
 
 if __name__ == "__main__":
-    print("=" * 50)
-    print("🐱 КОТ-БОТ ЗАПУЩЕН!")
-    print("=" * 50)
-    print("Бот: @kot_helper_bot")
-    print("Поиск в интернете работает ТОЛЬКО если:")
-    print("- Сказать 'найди' или 'поищи'")
-    print("- Спросить с вопросительным словом")
-    print("=" * 50)
+    print("🐱 Кот-бот запущен!")
     bot.infinity_polling()
