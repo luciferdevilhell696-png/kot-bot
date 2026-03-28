@@ -32,6 +32,7 @@ def clear_memory(user_id):
 
 def search_web(query):
     try:
+        print(f"🔍 Поиск: {query}")
         response = requests.get(SEARXNG_URL, params={
             "q": query,
             "format": "json",
@@ -42,21 +43,17 @@ def search_web(query):
             data = response.json()
             results = data.get("results", [])
             if results:
+                print(f"✅ Найдено {len(results)} результатов")
                 return [{
                     "title": r.get("title", "Без названия"),
                     "url": r.get("url", ""),
                     "content": r.get("content", "")[:500]
                 } for r in results[:3]]
+        print(f"❌ Ничего не найдено")
         return None
     except Exception as e:
         print(f"Ошибка поиска: {e}")
         return None
-
-def need_search(query):
-    q = query.lower()
-    if "котопоиск" in q:
-        return True
-    return False
 
 def get_access_token():
     global access_token, token_expires_at
@@ -85,6 +82,7 @@ def get_access_token():
             print("✅ Получен новый Access Token")
             return access_token
         else:
+            print(f"❌ Ошибка токена: {response.status_code}")
             return None
     except Exception as e:
         print(f"Ошибка: {e}")
@@ -156,6 +154,7 @@ def ask_gigachat(question, user_id, search_results=None):
                 return answer + links
             return answer
         else:
+            print(f"❌ Ошибка GigaChat: {response.status_code}")
             return fallback_response(question, user_id, search_results)
             
     except Exception as e:
@@ -206,7 +205,35 @@ def handle_message(message):
     user_id = message.from_user.id
     is_reply_to_bot = (message.reply_to_message and message.reply_to_message.from_user.id == bot.get_me().id)
     
-    if "кот" in message.text.lower() or is_reply_to_bot:
+    text_lower = message.text.lower()
+    
+    # Проверка на команду Котопоиск (без привязки к слову "кот" в начале)
+    if "котопоиск" in text_lower:
+        # Убираем "котопоиск" из запроса
+        user_query = re.sub(r'котопоиск', '', text_lower).strip()
+        if not user_query:
+            bot.reply_to(message, "Мяу! Напиши что искать после «Котопоиск», например:\n«Котопоиск новости сегодня» 🔍🐱")
+            return
+        
+        bot.send_chat_action(message.chat.id, "typing")
+        status_msg = bot.send_message(message.chat.id, "🔍 Мяу... ищу в интернете...")
+        search_results = search_web(user_query)
+        
+        if search_results:
+            bot.edit_message_text("💭 Мяу... обрабатываю...", message.chat.id, status_msg.message_id)
+            answer = ask_gigachat(user_query, user_id, search_results)
+            bot.delete_message(message.chat.id, status_msg.message_id)
+        else:
+            bot.edit_message_text("😿 Мяу... ничего не нашёл. Попробуй переформулировать запрос!", message.chat.id, status_msg.message_id)
+            time.sleep(2)
+            bot.delete_message(message.chat.id, status_msg.message_id)
+            answer = "Мяу... Ничего не нашёл по этому запросу. Попробуй спросить по-другому! 🐱"
+        
+        bot.reply_to(message, answer)
+        return
+    
+    # Обычная проверка на слово "кот" или ответ на сообщение бота
+    if "кот" in text_lower or is_reply_to_bot:
         user_query = message.text.strip()
         
         if is_reply_to_bot and "кот" not in user_query.lower():
@@ -219,21 +246,7 @@ def handle_message(message):
             return
         
         bot.send_chat_action(message.chat.id, "typing")
-        
-        if need_search(user_query):
-            user_query_clean = re.sub(r'котопоиск', '', user_query.lower()).strip()
-            if not user_query_clean:
-                bot.reply_to(message, "Мяу! Напиши что искать после «Котопоиск», например:\n«Котопоиск новости сегодня» 🔍🐱")
-                return
-            
-            status_msg = bot.send_message(message.chat.id, "🔍 Мяу... ищу в интернете...")
-            search_results = search_web(user_query_clean)
-            bot.edit_message_text("💭 Мяу... обрабатываю...", message.chat.id, status_msg.message_id)
-            answer = ask_gigachat(user_query_clean, user_id, search_results)
-            bot.delete_message(message.chat.id, status_msg.message_id)
-        else:
-            answer = ask_gigachat(user_query, user_id, None)
-        
+        answer = ask_gigachat(user_query, user_id, None)
         bot.reply_to(message, answer)
 
 if __name__ == "__main__":
@@ -246,6 +259,5 @@ if __name__ == "__main__":
     print("• «Кот посоветуй аниме» — аниме")
     print("• «Котопоиск что-то» — поиск в интернете 🔍")
     print("• «Кот что я говорил» — показать память")
-    print("• «Кот забудь всё» — очистить память")
     print("=" * 50)
     bot.infinity_polling()
