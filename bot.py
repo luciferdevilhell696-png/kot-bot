@@ -36,8 +36,9 @@ def search_web(query):
         response = requests.get(SEARXNG_URL, params={
             "q": query,
             "format": "json",
-            "limit": 3
-        }, timeout=10)
+            "language": "ru",
+            "limit": 5
+        }, timeout=15)
         
         if response.status_code == 200:
             data = response.json()
@@ -48,8 +49,7 @@ def search_web(query):
                     "title": r.get("title", "Без названия"),
                     "url": r.get("url", ""),
                     "content": r.get("content", "")[:500]
-                } for r in results[:3]]
-        print(f"❌ Ничего не найдено")
+                } for r in results[:5]]
         return None
     except Exception as e:
         print(f"Ошибка поиска: {e}")
@@ -82,17 +82,16 @@ def get_access_token():
             print("✅ Получен новый Access Token")
             return access_token
         else:
-            print(f"❌ Ошибка токена: {response.status_code}")
             return None
     except Exception as e:
         print(f"Ошибка: {e}")
         return None
 
-def ask_gigachat(question, user_id, search_results=None):
+def ask_gigachat(question, user_id, search_results=None, include_links=False):
     try:
         token = get_access_token()
         if not token:
-            return fallback_response(question, user_id, search_results)
+            return fallback_response(question, user_id, search_results, include_links)
         
         url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
         
@@ -113,15 +112,24 @@ def ask_gigachat(question, user_id, search_results=None):
         
         if search_results:
             context = "\n\n".join([
-                f"📌 {r['title']}\n{r['content']}\n🔗 {r['url']}"
-                for r in search_results[:2]
+                f"📌 {r['title']}\n{r['content']}"
+                for r in search_results[:3]
             ])
-            enhanced_question = f"""{question}
+            
+            if include_links:
+                enhanced_question = f"""{question}
 
 Информация из интернета:
 {context}
 
-Используй ТОЛЬКО эту информацию для ответа."""
+Ответь кратко на основе этой информации. В конце добавь ссылки на источники."""
+            else:
+                enhanced_question = f"""{question}
+
+Информация из интернета:
+{context}
+
+Ответь кратко на основе этой информации. НЕ добавляй ссылки, только текст ответа."""
         else:
             enhanced_question = question
         
@@ -149,28 +157,33 @@ def ask_gigachat(question, user_id, search_results=None):
             add_to_memory(user_id, "user", question)
             add_to_memory(user_id, "assistant", answer)
             
-            if search_results:
+            if include_links and search_results:
                 links = "\n\n📌 Источники:\n" + "\n".join([r["url"] for r in search_results[:2]])
                 return answer + links
             return answer
         else:
-            print(f"❌ Ошибка GigaChat: {response.status_code}")
-            return fallback_response(question, user_id, search_results)
+            return fallback_response(question, user_id, search_results, include_links)
             
     except Exception as e:
         print(f"Ошибка: {e}")
-        return fallback_response(question, user_id, search_results)
+        return fallback_response(question, user_id, search_results, include_links)
 
-def fallback_response(question, user_id, search_results=None):
+def fallback_response(question, user_id, search_results=None, include_links=False):
     q = question.lower()
     
     add_to_memory(user_id, "user", question)
     
     if search_results:
-        reply = f"Мяу! Вот что я нашёл по запросу:\n\n"
-        for r in search_results[:2]:
-            reply += f"📌 {r['title']}\n{r['url']}\n\n"
-        return reply + "🐱"
+        if include_links:
+            reply = f"Мяу! Вот что я нашёл:\n\n"
+            for r in search_results[:3]:
+                reply += f"📌 {r['title']}\n{r['url']}\n\n"
+            return reply + "🐱"
+        else:
+            reply = f"Мяу! Вот что я нашёл:\n\n"
+            for r in search_results[:2]:
+                reply += f"• {r['title']}\n"
+            return reply + "\nЧтобы увидеть ссылки, напиши «Котопоиск +ссылка» 🐱"
     
     if "забудь" in q or "очисти память" in q:
         return clear_memory(user_id)
@@ -190,15 +203,15 @@ def fallback_response(question, user_id, search_results=None):
     elif "аниме" in q or "посоветуй" in q:
         return "Мяу! Советую:\n\n🎬 Киберпанк: Бегущие по краю\n🎬 Фрирен\n🎬 Дандадан\n\nПриятного просмотра! 🐱"
     elif "кто ты" in q:
-        return "Мяу! Я Кот — твой пушистый помощник! Запоминаю разговоры и умею искать в интернете по команде «Котопоиск» 🐱"
+        return "Мяу! Я Кот — твой пушистый помощник!\n\nУмею искать в интернете:\n• «Котопоиск что-то» — без ссылок\n• «Котопоиск +ссылка что-то» — со ссылками 🐱"
     elif "что ты умеешь" in q:
-        return "Мяу! Я умею:\n• Общаться 💬\n• Советовать аниме 🎬\n• Запоминать разговор 🧠\n• Искать в интернете 🔍\n\nЧтобы найти что-то, напиши: «Котопоиск что ты знаешь о...» 🐱"
+        return "Мяу! Я умею:\n• Общаться 💬\n• Советовать аниме 🎬\n• Запоминать разговор 🧠\n• Искать в интернете 🔍\n\nПоиск:\n• «Котопоиск новости» — без ссылок\n• «Котопоиск +ссылка новости» — со ссылками 🐱"
     elif "спасибо" in q:
         return "Мур-мяу! Всегда пожалуйста! 😊🐱"
     elif "пока" in q:
         return "Мяу! Пока-пока! Заходи ещё 🐱👋"
     else:
-        return f"Мяу... Я не понял. Напиши:\n• «Кот привет»\n• «Кот посоветуй аниме»\n• «Котопоиск новости»\n• «Кот что я говорил» 🐱"
+        return f"Мяу... Я не понял. Напиши:\n• «Кот привет»\n• «Кот посоветуй аниме»\n• «Котопоиск новости»\n• «Котопоиск +ссылка новости»\n• «Кот что я говорил» 🐱"
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
@@ -207,12 +220,18 @@ def handle_message(message):
     
     text_lower = message.text.lower()
     
-    # Проверка на команду Котопоиск (без привязки к слову "кот" в начале)
+    # Проверка на команду Котопоиск
     if "котопоиск" in text_lower:
-        # Убираем "котопоиск" из запроса
-        user_query = re.sub(r'котопоиск', '', text_lower).strip()
+        include_links = "+ссылка" in text_lower
+        
+        # Убираем "котопоиск" и "+ссылка" из запроса
+        user_query = re.sub(r'котопоиск', '', text_lower)
+        if include_links:
+            user_query = re.sub(r'\+ссылка', '', user_query)
+        user_query = user_query.strip()
+        
         if not user_query:
-            bot.reply_to(message, "Мяу! Напиши что искать после «Котопоиск», например:\n«Котопоиск новости сегодня» 🔍🐱")
+            bot.reply_to(message, "Мяу! Напиши что искать после «Котопоиск», например:\n\n«Котопоиск новости» — без ссылок\n«Котопоиск +ссылка новости» — со ссылками 🔍🐱")
             return
         
         bot.send_chat_action(message.chat.id, "typing")
@@ -221,7 +240,7 @@ def handle_message(message):
         
         if search_results:
             bot.edit_message_text("💭 Мяу... обрабатываю...", message.chat.id, status_msg.message_id)
-            answer = ask_gigachat(user_query, user_id, search_results)
+            answer = ask_gigachat(user_query, user_id, search_results, include_links)
             bot.delete_message(message.chat.id, status_msg.message_id)
         else:
             bot.edit_message_text("😿 Мяу... ничего не нашёл. Попробуй переформулировать запрос!", message.chat.id, status_msg.message_id)
@@ -246,18 +265,20 @@ def handle_message(message):
             return
         
         bot.send_chat_action(message.chat.id, "typing")
-        answer = ask_gigachat(user_query, user_id, None)
+        answer = ask_gigachat(user_query, user_id, None, False)
         bot.reply_to(message, answer)
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("🐱 КОТ-БОТ С КОМАНДОЙ КОТОПОИСК!")
+    print("🐱 КОТ-БОТ С ДВУМЯ РЕЖИМАМИ ПОИСКА!")
     print("=" * 50)
     print(f"Бот: @{bot.get_me().username}")
-    print("\nКоманды:")
+    print("\nПоиск в интернете:")
+    print("• «Котопоиск что-то» — ответ без ссылок")
+    print("• «Котопоиск +ссылка что-то» — ответ со ссылками")
+    print("\nОбычное общение:")
     print("• «Кот привет» — общение")
     print("• «Кот посоветуй аниме» — аниме")
-    print("• «Котопоиск что-то» — поиск в интернете 🔍")
-    print("• «Кот что я говорил» — показать память")
+    print("• «Кот что я говорил» — память")
     print("=" * 50)
     bot.infinity_polling()
