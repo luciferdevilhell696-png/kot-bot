@@ -54,16 +54,8 @@ def search_web(query):
 
 def need_search(query):
     q = query.lower()
-    
-    if "найди" in q or "поищи" in q or "узнай" in q:
+    if "котопоиск" in q:
         return True
-    
-    question_words = ["кто", "что", "где", "когда", "почему", "зачем", "какой", "сколько"]
-    for word in question_words:
-        if word in q:
-            if "аниме" not in q:
-                return True
-    
     return False
 
 def get_access_token():
@@ -199,15 +191,15 @@ def fallback_response(question, user_id, search_results=None):
     elif "аниме" in q or "посоветуй" in q:
         return "Мяу! Советую:\n\n🎬 Киберпанк: Бегущие по краю\n🎬 Фрирен\n🎬 Дандадан\n\nПриятного просмотра! 🐱"
     elif "кто ты" in q:
-        return "Мяу! Я Кот — твой пушистый помощник! Запоминаю разговоры и могу искать в интернете 🐱"
+        return "Мяу! Я Кот — твой пушистый помощник! Запоминаю разговоры и умею искать в интернете по команде «Котопоиск» 🐱"
     elif "что ты умеешь" in q:
-        return "Мяу! Я умею:\n• Общаться 💬\n• Советовать аниме 🎬\n• Запоминать разговор 🧠\n• Искать в интернете 🔍\n\nНапиши «найди» или спроси с вопросительным словом 🐱"
+        return "Мяу! Я умею:\n• Общаться 💬\n• Советовать аниме 🎬\n• Запоминать разговор 🧠\n• Искать в интернете 🔍\n\nЧтобы найти что-то, напиши: «Котопоиск что ты знаешь о...» 🐱"
     elif "спасибо" in q:
         return "Мур-мяу! Всегда пожалуйста! 😊🐱"
     elif "пока" in q:
         return "Мяу! Пока-пока! Заходи ещё 🐱👋"
     else:
-        return f"Мяу... Я не понял. Напиши:\n• «Кот привет»\n• «Кот посоветуй аниме»\n• «Кот найди новости»\n• «Кот что я говорил» 🐱"
+        return f"Мяу... Я не понял. Напиши:\n• «Кот привет»\n• «Кот посоветуй аниме»\n• «Котопоиск новости»\n• «Кот что я говорил» 🐱"
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
@@ -223,16 +215,21 @@ def handle_message(message):
             user_query = re.sub(r'[Кк]от[,\s]?', '', user_query).strip()
         
         if not user_query:
-            bot.reply_to(message, "Мяу? Я слушаю... Напиши что-нибудь, например:\n\n«Кот привет»\n«Кот как дела?»\n«Кот посоветуй аниме»\n«Кот найди новости»\n«Кот что я говорил» 🐱")
+            bot.reply_to(message, "Мяу? Я слушаю... Напиши что-нибудь, например:\n\n«Кот привет»\n«Кот как дела?»\n«Кот посоветуй аниме»\n«Котопоиск новости»\n«Кот что я говорил» 🐱")
             return
         
         bot.send_chat_action(message.chat.id, "typing")
         
         if need_search(user_query):
+            user_query_clean = re.sub(r'котопоиск', '', user_query.lower()).strip()
+            if not user_query_clean:
+                bot.reply_to(message, "Мяу! Напиши что искать после «Котопоиск», например:\n«Котопоиск новости сегодня» 🔍🐱")
+                return
+            
             status_msg = bot.send_message(message.chat.id, "🔍 Мяу... ищу в интернете...")
-            search_results = search_web(user_query)
+            search_results = search_web(user_query_clean)
             bot.edit_message_text("💭 Мяу... обрабатываю...", message.chat.id, status_msg.message_id)
-            answer = ask_gigachat(user_query, user_id, search_results)
+            answer = ask_gigachat(user_query_clean, user_id, search_results)
             bot.delete_message(message.chat.id, status_msg.message_id)
         else:
             answer = ask_gigachat(user_query, user_id, None)
@@ -241,19 +238,14 @@ def handle_message(message):
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("🐱 КОТ-БОТ С ПАМЯТЬЮ И ПОИСКОМ ЗАПУЩЕН!")
+    print("🐱 КОТ-БОТ С КОМАНДОЙ КОТОПОИСК!")
     print("=" * 50)
     print(f"Бот: @{bot.get_me().username}")
-    print("Реагирует на:")
-    print("1. Сообщения со словом 'Кот'")
-    print("2. Ответы на свои сообщения")
-    print("\nВозможности:")
-    print("• Запоминает разговор 🧠")
-    print("• Ищет в интернете 🔍")
-    print("• Советует аниме 🎬")
     print("\nКоманды:")
+    print("• «Кот привет» — общение")
+    print("• «Кот посоветуй аниме» — аниме")
+    print("• «Котопоиск что-то» — поиск в интернете 🔍")
     print("• «Кот что я говорил» — показать память")
-    print("• «Кот найди ...» — поиск в интернете")
     print("• «Кот забудь всё» — очистить память")
     print("=" * 50)
     bot.infinity_polling()
