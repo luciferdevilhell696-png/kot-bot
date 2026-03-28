@@ -117,7 +117,7 @@ def ask_kimi(question, user_id, search_results=None, include_links=False):
                 return answer + links
             return answer
         else:
-            print(f"❌ Ошибка Kimi: {response.status_code} - {response.text}")
+            print(f"❌ Ошибка Kimi: {response.status_code}")
             return fallback_response(question, user_id, search_results, include_links)
             
     except Exception as e:
@@ -221,12 +221,13 @@ if __name__ == "__main__":
     print("=" * 50)
     print(f"Бот: @{bot.get_me().username}")
     print("Модель: Kimi (moonshot-v1-8k)")
-    print("\nПоиск в интернете:")
-    print("• «Котопоиск что-то» — ответ без ссылок")
-    print("• «Котопоиск +ссылка что-то» — ответ со ссылками")
-    print("\nОбычное общение:")
-    print("• «Кот привет» — общение")
-    print("• «Кот посоветуй аниме» — аниме")
-    print("• «Кот что я говорил» — память")
     print("=" * 50)
-    bot.infinity_polling()
+    
+    # Запускаем с обработкой ошибок
+    while True:
+        try:
+            bot.infinity_polling(timeout=60, long_polling_timeout=60)
+        except Exception as e:
+            print(f"Ошибка: {e}")
+            time.sleep(15)
+            print("Перезапуск...")
