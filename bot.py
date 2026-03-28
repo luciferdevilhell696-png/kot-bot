@@ -3,38 +3,68 @@ import requests
 import re
 import uuid
 import time
-import json
 from collections import defaultdict
 
 TELEGRAM_TOKEN = "8785895690:AAFjNx1sMzJvjPgo6G5Qe-qSz5-E4QkN1_A"
 GIGACHAT_AUTH_KEY = "MDE5ZDMzOTYtMjhjYy03M2YzLWJlNGItOTAzYTZiYzI3YzA0OmQzYTk3YzdmLWRlZDMtNDE2ZS04NGIzLTg1YmU2OWJjZTg3OA=="
+SEARXNG_URL = "https://searxng-railway-production-6f14.up.railway.app/search"
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 access_token = None
 token_expires_at = 0
 
-# Хранилище памяти для каждого пользователя
-# Формат: {user_id: [{"role": "user/assistant", "content": "..."}, ...]}
 user_memory = defaultdict(list)
-MAX_MEMORY = 10  # Храним последние 10 сообщений
+MAX_MEMORY = 10
 
 def get_user_memory(user_id):
-    """Получить историю диалога пользователя"""
     return user_memory[user_id]
 
 def add_to_memory(user_id, role, content):
-    """Добавить сообщение в память"""
     user_memory[user_id].append({"role": role, "content": content})
-    # Ограничиваем размер памяти
     if len(user_memory[user_id]) > MAX_MEMORY:
         user_memory[user_id].pop(0)
 
 def clear_memory(user_id):
-    """Очистить память пользователя"""
     if user_id in user_memory:
         user_memory[user_id] = []
     return "Мяу! Я всё забыл. Начинаем с чистого листа! 🐱"
+
+def search_web(query):
+    try:
+        response = requests.get(SEARXNG_URL, params={
+            "q": query,
+            "format": "json",
+            "limit": 3
+        }, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            results = data.get("results", [])
+            if results:
+                return [{
+                    "title": r.get("title", "Без названия"),
+                    "url": r.get("url", ""),
+                    "content": r.get("content", "")[:500]
+                } for r in results[:3]]
+        return None
+    except Exception as e:
+        print(f"Ошибка поиска: {e}")
+        return None
+
+def need_search(query):
+    q = query.lower()
+    
+    if "найди" in q or "поищи" in q or "узнай" in q:
+        return True
+    
+    question_words = ["кто", "что", "где", "когда", "почему", "зачем", "какой", "сколько"]
+    for word in question_words:
+        if word in q:
+            if "аниме" not in q:
+                return True
+    
+    return False
 
 def get_access_token():
     global access_token, token_expires_at
@@ -44,9 +74,7 @@ def get_access_token():
     
     url = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
     
-    payload = {
-        'scope': 'GIGACHAT_API_PERS'
-    }
+    payload = {'scope': 'GIGACHAT_API_PERS'}
     
     headers = {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -65,42 +93,49 @@ def get_access_token():
             print("✅ Получен новый Access Token")
             return access_token
         else:
-            print(f"❌ Ошибка получения токена: {response.status_code}")
             return None
-            
     except Exception as e:
-        print(f"❌ Ошибка: {e}")
+        print(f"Ошибка: {e}")
         return None
 
-def ask_gigachat(question, user_id):
+def ask_gigachat(question, user_id, search_results=None):
     try:
         token = get_access_token()
         if not token:
-            return fallback_response(question, user_id)
+            return fallback_response(question, user_id, search_results)
         
         url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
         
-        # Получаем историю диалога
         history = get_user_memory(user_id)
         
-        # Формируем системный промпт с контекстом
-        system_prompt = """Ты — кот-помощник по имени Кот. Отвечай дружелюбно.
+        system_prompt = """Ты кот-помощник по имени Кот. Отвечай дружелюбно на русском языке.
 
 Правила:
 1. Отвечай на русском языке
 2. Добавляй "мяу" в конце
 3. Отвечай кратко (1-2 предложения)
-4. Помни контекст разговора, отвечай на основе предыдущих сообщений"""
+4. Помни контекст разговора"""
 
-        # Собираем все сообщения для отправки
         messages = [{"role": "system", "content": system_prompt}]
         
-        # Добавляем историю диалога (последние сообщения)
-        for msg in history:
+        for msg in history[-6:]:
             messages.append(msg)
         
-        # Добавляем текущий вопрос
-        messages.append({"role": "user", "content": question})
+        if search_results:
+            context = "\n\n".join([
+                f"📌 {r['title']}\n{r['content']}\n🔗 {r['url']}"
+                for r in search_results[:2]
+            ])
+            enhanced_question = f"""{question}
+
+Информация из интернета:
+{context}
+
+Используй ТОЛЬКО эту информацию для ответа."""
+        else:
+            enhanced_question = question
+        
+        messages.append({"role": "user", "content": enhanced_question})
         
         payload = {
             "model": "GigaChat",
@@ -121,24 +156,30 @@ def ask_gigachat(question, user_id):
             data = response.json()
             answer = data['choices'][0]['message']['content']
             
-            # Сохраняем в память
             add_to_memory(user_id, "user", question)
             add_to_memory(user_id, "assistant", answer)
             
+            if search_results:
+                links = "\n\n📌 Источники:\n" + "\n".join([r["url"] for r in search_results[:2]])
+                return answer + links
             return answer
         else:
-            print(f"❌ Ошибка GigaChat: {response.status_code}")
-            return fallback_response(question, user_id)
+            return fallback_response(question, user_id, search_results)
             
     except Exception as e:
-        print(f"❌ Ошибка: {e}")
-        return fallback_response(question, user_id)
+        print(f"Ошибка: {e}")
+        return fallback_response(question, user_id, search_results)
 
-def fallback_response(question, user_id):
+def fallback_response(question, user_id, search_results=None):
     q = question.lower()
     
-    # Сохраняем вопрос в память (без ответа)
     add_to_memory(user_id, "user", question)
+    
+    if search_results:
+        reply = f"Мяу! Вот что я нашёл по запросу:\n\n"
+        for r in search_results[:2]:
+            reply += f"📌 {r['title']}\n{r['url']}\n\n"
+        return reply + "🐱"
     
     if "забудь" in q or "очисти память" in q:
         return clear_memory(user_id)
@@ -146,9 +187,8 @@ def fallback_response(question, user_id):
         history = get_user_memory(user_id)
         if not history:
             return "Мяу... Мы ещё не разговаривали. Напиши что-нибудь! 🐱"
-        last_few = history[-3:]  # Последние 3 сообщения
         result = "Мяу! Вот что ты спрашивал недавно:\n\n"
-        for msg in last_few:
+        for msg in history[-4:]:
             role = "Ты" if msg["role"] == "user" else "Я"
             result += f"{role}: {msg['content'][:50]}\n"
         return result + "🐱"
@@ -159,15 +199,15 @@ def fallback_response(question, user_id):
     elif "аниме" in q or "посоветуй" in q:
         return "Мяу! Советую:\n\n🎬 Киберпанк: Бегущие по краю\n🎬 Фрирен\n🎬 Дандадан\n\nПриятного просмотра! 🐱"
     elif "кто ты" in q:
-        return "Мяу! Я Кот — твой пушистый помощник с памятью! Запоминаю наш разговор 🐱"
+        return "Мяу! Я Кот — твой пушистый помощник! Запоминаю разговоры и могу искать в интернете 🐱"
     elif "что ты умеешь" in q:
-        return "Мяу! Я умею:\n• Общаться 💬\n• Советовать аниме 🎬\n• Запоминать разговор 🧠\n• Отвечать на вопросы 🤔\n\nНапиши «забудь всё» чтобы очистить память! 🐱"
+        return "Мяу! Я умею:\n• Общаться 💬\n• Советовать аниме 🎬\n• Запоминать разговор 🧠\n• Искать в интернете 🔍\n\nНапиши «найди» или спроси с вопросительным словом 🐱"
     elif "спасибо" in q:
         return "Мур-мяу! Всегда пожалуйста! 😊🐱"
     elif "пока" in q:
         return "Мяу! Пока-пока! Заходи ещё 🐱👋"
     else:
-        return f"Мяу... Я не понял. Напиши «Кот привет» или «Кот посоветуй аниме» 🐱"
+        return f"Мяу... Я не понял. Напиши:\n• «Кот привет»\n• «Кот посоветуй аниме»\n• «Кот найди новости»\n• «Кот что я говорил» 🐱"
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
@@ -183,23 +223,37 @@ def handle_message(message):
             user_query = re.sub(r'[Кк]от[,\s]?', '', user_query).strip()
         
         if not user_query:
-            bot.reply_to(message, "Мяу? Я слушаю... Напиши что-нибудь, например:\n\n«Кот привет»\n«Кот как дела?»\n«Кот посоветуй аниме»\n«Кот что я говорил» — показать память\n«Кот забудь всё» — очистить память 🐱")
+            bot.reply_to(message, "Мяу? Я слушаю... Напиши что-нибудь, например:\n\n«Кот привет»\n«Кот как дела?»\n«Кот посоветуй аниме»\n«Кот найди новости»\n«Кот что я говорил» 🐱")
             return
         
         bot.send_chat_action(message.chat.id, "typing")
-        answer = ask_gigachat(user_query, user_id)
+        
+        if need_search(user_query):
+            status_msg = bot.send_message(message.chat.id, "🔍 Мяу... ищу в интернете...")
+            search_results = search_web(user_query)
+            bot.edit_message_text("💭 Мяу... обрабатываю...", message.chat.id, status_msg.message_id)
+            answer = ask_gigachat(user_query, user_id, search_results)
+            bot.delete_message(message.chat.id, status_msg.message_id)
+        else:
+            answer = ask_gigachat(user_query, user_id, None)
+        
         bot.reply_to(message, answer)
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("🐱 КОТ-БОТ С ПАМЯТЬЮ ЗАПУЩЕН!")
+    print("🐱 КОТ-БОТ С ПАМЯТЬЮ И ПОИСКОМ ЗАПУЩЕН!")
     print("=" * 50)
     print(f"Бот: @{bot.get_me().username}")
     print("Реагирует на:")
     print("1. Сообщения со словом 'Кот'")
     print("2. Ответы на свои сообщения")
-    print("Новые команды:")
-    print("• «Кот что я говорил» — показать историю")
+    print("\nВозможности:")
+    print("• Запоминает разговор 🧠")
+    print("• Ищет в интернете 🔍")
+    print("• Советует аниме 🎬")
+    print("\nКоманды:")
+    print("• «Кот что я говорил» — показать память")
+    print("• «Кот найди ...» — поиск в интернете")
     print("• «Кот забудь всё» — очистить память")
     print("=" * 50)
     bot.infinity_polling()
