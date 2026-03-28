@@ -1,6 +1,8 @@
 import telebot
+import requests
 import re
-from gigachat import GigaChat
+import uuid
+import time
 
 # ========== ТВОИ ДАННЫЕ ==========
 TELEGRAM_TOKEN = "8785895690:AAFjNx1sMzJvjPgo6G5Qe-qSz5-E4QkN1_A"
@@ -8,62 +10,140 @@ GIGACHAT_AUTH_KEY = "MDE5ZDMzOTYtMjhjYy03M2YzLWJlNGItOTAzYTZiYzI3YzA0OmQzYTk3Yzd
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-def ask_gigachat(question):
-    """Отправляет вопрос в GigaChat и получает ответ на русском"""
+# Храним токен доступа
+access_token = None
+token_expires_at = 0
+
+def get_access_token():
+    """Получает Access Token для GigaChat"""
+    global access_token, token_expires_at
+    
+    # Если токен ещё не истёк (30 минут)
+    if access_token and time.time() < token_expires_at:
+        return access_token
+    
+    url = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+    
+    payload = {
+        'scope': 'GIGACHAT_API_PERS'
+    }
+    
+    headers = {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json',
+        'RqUID': str(uuid.uuid4()),
+        'Authorization': f'Basic {GIGACHAT_AUTH_KEY}'
+    }
+    
     try:
-        with GigaChat(
-            credentials=GIGACHAT_AUTH_KEY,
-            model="GigaChat-2-Lite",
-            verify_ssl_certs=False,
-            timeout=30
-        ) as client:
+        response = requests.post(url, headers=headers, data=payload, verify=False, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            access_token = data.get('access_token')
+            # Токен живёт 30 минут
+            token_expires_at = time.time() + 25 * 60  # 25 минут для запаса
+            print("✅ Получен новый Access Token")
+            return access_token
+        else:
+            print(f"❌ Ошибка получения токена: {response.status_code} - {response.text}")
+            return None
             
-            prompt = f"""Ты — кот-помощник по имени Кот. Ты общаешься с другом.
+    except Exception as e:
+        print(f"❌ Ошибка: {e}")
+        return None
+
+def ask_gigachat(question):
+    """Отправляет вопрос в GigaChat"""
+    try:
+        # Получаем токен
+        token = get_access_token()
+        if not token:
+            return fallback_response(question)
+        
+        url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
+        
+        payload = {
+            "model": "GigaChat",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": f"""Ты — кот-помощник по имени Кот. Отвечай дружелюбно.
 
 Правила:
 1. Отвечай на русском языке
-2. Будь дружелюбным, добавляй "мяу" или "мур"
+2. Добавляй "мяу" в конце
 3. Отвечай кратко (1-2 предложения)
-4. В конце ставь 🐱
 
-Вопрос друга: {question}
-
-Твой ответ:"""
-            
-            response = client.chat(prompt)
-            answer = response.choices[0].message.content
+Вопрос: {question}"""
+                }
+            ],
+            "temperature": 0.7,
+            "max_tokens": 500
+        }
+        
+        headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'Authorization': f'Bearer {token}'
+        }
+        
+        response = requests.post(url, headers=headers, json=payload, verify=False, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            answer = data['choices'][0]['message']['content']
             return answer
+        else:
+            print(f"❌ Ошибка GigaChat: {response.status_code} - {response.text}")
+            return fallback_response(question)
             
     except Exception as e:
-        print(f"Ошибка GigaChat: {e}")
-        return "Мяу... У меня проблемы с интернетом. Попробуй позже! 🐱"
+        print(f"❌ Ошибка: {e}")
+        return fallback_response(question)
+
+def fallback_response(question):
+    """Запасные ответы"""
+    q = question.lower()
+    
+    if "привет" in q:
+        return "Мур-мяу! Приветствую, друг! Как настроение? 🐱"
+    elif "как дела" in q:
+        return "Мурлычу отлично! Греюсь на солнышке ☀️🐱"
+    elif "аниме" in q or "посоветуй" in q:
+        return "Мяу! Советую:\n\n🎬 «Киберпанк: Бегущие по краю»\n🎬 «Фрирен»\n🎬 «Дандадан»\n\nПриятного просмотра! 🐱"
+    elif "кто ты" in q:
+        return "Мяу! Я Кот — твой пушистый помощник! 🐱"
+    elif "что ты умеешь" in q:
+        return "Мяу! Я умею общаться, советовать аниме и отвечать на вопросы! 🐱"
+    elif "спасибо" in q:
+        return "Мур-мяу! Всегда пожалуйста! 😊🐱"
+    elif "пока" in q:
+        return "Мяу! Пока-пока! Заходи ещё 🐱👋"
+    else:
+        return f"Мяу... Я не понял. Напиши «Кот привет» или «Кот посоветуй аниме» 🐱"
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
-    # Проверяем, есть ли слово "кот" в сообщении
     if "кот" in message.text.lower():
-        # Убираем слово "кот" из запроса
         user_query = re.sub(r'[Кк]от[,\s]?', '', message.text).strip()
         
-        # Если ничего не написали после "кот"
         if not user_query:
-            bot.reply_to(message, "Мяу? Я слушаю... Просто напиши что-нибудь, например:\n\n«Кот привет»\n«Кот как дела?»\n«Кот посоветуй аниме» 🐱")
+            bot.reply_to(message, "Мяу? Я слушаю... Напиши что-нибудь, например:\n\n«Кот привет»\n«Кот как дела?»\n«Кот посоветуй аниме» 🐱")
             return
         
-        # Показываем, что бот печатает
         bot.send_chat_action(message.chat.id, "typing")
         
-        # Получаем ответ от GigaChat
+        # Пробуем получить ответ от GigaChat
         answer = ask_gigachat(user_query)
         
-        # Отправляем ответ
         bot.reply_to(message, answer)
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("🐱 КОТ-БОТ ЗАПУЩЕН!")
+    print("🐱 КОТ-БОТ С GIGACHAT ЗАПУЩЕН!")
     print("=" * 50)
-    print("Бот отвечает только когда его зовут 'Кот'")
-    print("Общается на русском языке")
+    print(f"Бот: @{bot.get_me().username}")
+    print("Жду когда меня позовут словом 'Кот'...")
     print("=" * 50)
     bot.infinity_polling()
