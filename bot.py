@@ -300,11 +300,8 @@ def fallback_response(question, user_id, user_name, search_results=None, include
                 reply += f"• {r['title']}\n"
             return reply + "\nХочешь ссылки? Добавь +ссылка! мяу 🐱"
 
-    # ========== КОМАНДА "КАК МЕНЯ ЗОВУТ" ==========
     if "как меня зовут" in q or "как меня звать" in q or "моё имя" in q:
         return f"Мяу! Твоё имя — {user_name}! Разве ты забыл? 😸 мяу 🐱"
-    
-    # ========== АНИМЕ-КОМАНДЫ ==========
     
     if "посоветуй аниме" in q or "рекомендуй аниме" in q:
         for genre in ["боевик", "романтика", "комедия", "фэнтези", "драма", "ужасы"]:
@@ -323,8 +320,6 @@ def fallback_response(question, user_id, user_name, search_results=None, include
         if anime_name:
             return search_anime_by_name(anime_name)
         return "Мяу! Напиши название аниме, которое хочешь найти! 🐱"
-    
-    # ========== ОБЫЧНЫЕ КОМАНДЫ ==========
     
     elif "забудь" in q or "очисти память" in q:
         return clear_memory(user_id)
