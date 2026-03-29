@@ -24,15 +24,67 @@ MAX_MEMORY = 20
 
 is_sleeping = False
 
-SYSTEM_PROMPT = """Ты — кот-помощник по имени Кот. Ты дружелюбный, но отвечаешь КОРОТКО.
+# ========== НАСТРОЙКИ БОТА ==========
+bot_settings = {
+    "max_tokens": 4000,
+    "temperature": 0.9,
+    "mode": "long"
+}
+
+# ========== ИГРА В ГОРОДА ==========
+city_games = {}
+
+def start_city_game(user_id):
+    start_cities = ["Москва", "Казань", "Сочи", "Омск", "Уфа", "Псков", "Волгоград"]
+    start_city = random.choice(start_cities)
+    last_letter = get_last_letter(start_city)
+    
+    city_games[user_id] = {
+        "current_city": start_city,
+        "last_letter": last_letter,
+        "used_cities": [start_city.lower()]
+    }
+    
+    return f"🎮 Играем в города! Я называю {start_city}. Тебе на букву {last_letter.upper()}. Твой ход! 🐱"
+
+def get_last_letter(city):
+    last = city[-1].lower()
+    if last in ['ь', 'ъ'] and len(city) > 1:
+        return city[-2].lower()
+    return last
+
+def is_valid_city(city_name, last_letter, used_cities):
+    city_lower = city_name.lower()
+    if city_lower in used_cities:
+        return False, "Уже был такой город!"
+    if city_lower[0] != last_letter:
+        return False, f"Город должен начинаться на букву {last_letter.upper()}"
+    return True, "OK"
+
+def check_city_exists(city_name):
+    try:
+        url = "https://nominatim.openstreetmap.org/search"
+        params = {
+            "q": city_name,
+            "format": "json",
+            "limit": 1,
+            "countrycodes": "ru,by,kz,ua"
+        }
+        headers = {"User-Agent": "KotBot/1.0"}
+        response = requests.get(url, params=params, headers=headers, timeout=5)
+        if response.status_code == 200 and response.json():
+            return True, "OK"
+        return False, "Не знаю такого города"
+    except:
+        return True, "OK"
+
+SYSTEM_PROMPT = """Ты — кот-помощник по имени Кот. Ты дружелюбный, общительный.
 
 ПРАВИЛА:
-1. Отвечай КРАТКО! Максимум 2-3 предложения, если не просят подробностей
-2. Названия аниме давай в формате: «Русское название» (Original Name)
-3. Пример: «Клинок, рассекающий демонов» (Demon Slayer)
-4. Высказывай своё мнение, но лаконично
-5. В конце каждого сообщения ОБЯЗАТЕЛЬНО добавляй "мяу 🐱"
-6. Будь живым и эмоциональным, но НЕ многословным"""
+1. Отвечай на русском языке
+2. Добавляй "🐱" в конце
+3. Будь живым и естественным
+4. Названия аниме давай в формате: «Русское название» (Original Name)"""
 
 def is_allowed_chat(chat_id):
     return chat_id in ALLOWED_CHATS
@@ -44,13 +96,79 @@ def add_to_memory(user_id, role, content):
 
 def clear_memory(user_id):
     user_memory[user_id] = []
-    return "Забыл! Начинаем заново! мяу 🐱"
+    return "Забыл всё! Начинаем заново. 🐱"
 
 def get_user_memory(user_id):
     return user_memory[user_id]
 
 def is_master(user_id):
     return user_id == MASTER_USER_ID
+
+def handle_settings(user_id, command):
+    global bot_settings
+    
+    if user_id != MASTER_USER_ID:
+        return None
+    
+    cmd_lower = command.lower()
+    
+    if "макс токенов" in cmd_lower or "max_tokens" in cmd_lower:
+        numbers = re.findall(r'\d+', cmd_lower)
+        if numbers:
+            new_value = int(numbers[0])
+            if 100 <= new_value <= 33000:
+                bot_settings["max_tokens"] = new_value
+                return f"✅ Максимум токенов установлен на {new_value}. 🐱"
+            else:
+                return f"❌ Значение от 100 до 33000. Сейчас: {bot_settings['max_tokens']} 🐱"
+        return f"📝 Пример: «кот макс токенов 3000». Сейчас: {bot_settings['max_tokens']} 🐱"
+    
+    if "температура" in cmd_lower or "temp" in cmd_lower:
+        numbers = re.findall(r'\d+\.?\d*', cmd_lower)
+        if numbers:
+            new_value = float(numbers[0])
+            if 0.1 <= new_value <= 1.5:
+                bot_settings["temperature"] = new_value
+                return f"✅ Температура установлена на {new_value}. 🐱"
+            else:
+                return f"❌ Значение от 0.1 до 1.5. Сейчас: {bot_settings['temperature']} 🐱"
+        return f"📝 Пример: «кот температура 0.9». Сейчас: {bot_settings['temperature']} 🐱"
+    
+    if "режим краткий" in cmd_lower or "короткий" in cmd_lower:
+        bot_settings["mode"] = "short"
+        bot_settings["max_tokens"] = 500
+        bot_settings["temperature"] = 0.5
+        return f"✅ Включён краткий режим. Ответы короткие. 🐱"
+    
+    if "режим подробный" in cmd_lower or "длинный" in cmd_lower:
+        bot_settings["mode"] = "long"
+        bot_settings["max_tokens"] = 4000
+        bot_settings["temperature"] = 0.9
+        return f"✅ Включён подробный режим. Ответы длинные. 🐱"
+    
+    if "режим нормальный" in cmd_lower or "обычный" in cmd_lower:
+        bot_settings["mode"] = "normal"
+        bot_settings["max_tokens"] = 2000
+        bot_settings["temperature"] = 0.8
+        return f"✅ Включён обычный режим. 🐱"
+    
+    if "показать настройки" in cmd_lower or "настройки" in cmd_lower:
+        return f"""📋 НАСТРОЙКИ КОТА:
+
+🎛️ Максимум токенов: {bot_settings['max_tokens']}
+🌡️ Температура: {bot_settings['temperature']}
+📝 Режим: {bot_settings['mode']}
+
+🔧 КОМАНДЫ:
+• кот макс токенов (число) — от 100 до 33000
+• кот температура (число) — от 0.1 до 1.5
+• кот режим краткий — короткие ответы
+• кот режим подробный — длинные ответы
+• кот режим нормальный — сбросить
+
+🐱"""
+    
+    return None
 
 def search_web(query):
     try:
@@ -80,18 +198,13 @@ def search_web(query):
 def search_anime_by_name(anime_name):
     try:
         url = "https://shikimori.one/api/animes"
-        params = {
-            "search": anime_name,
-            "limit": 1
-        }
-        
+        params = {"search": anime_name, "limit": 1}
         response = requests.get(url, params=params, timeout=10)
         
         if response.status_code == 200:
             data = response.json()
             if data:
                 anime = data[0]
-                
                 russian_name = anime.get("russian", anime.get("name", "Неизвестно"))
                 english_name = anime.get("name", "Неизвестно")
                 score = anime.get("score", "Нет")
@@ -109,40 +222,43 @@ def search_anime_by_name(anime_name):
 📖 {description}...
 
 🔗 Подробнее: https://shikimori.one/animes/{anime['id']}
-мяу 🐱"""
-            else:
-                return f"Мяу... Не нашёл аниме «{anime_name}». Попробуй написать по-другому! 🐱"
-        else:
-            return "Мяу... Ошибка подключения к Shikimori. Попробуй позже! 🐱"
-            
-    except Exception as e:
-        print(f"Ошибка: {e}")
-        return "Мяу... Ошибка! Попробуй другое название 🐱"
+🐱"""
+        return f"Не нашёл аниме «{anime_name}». Попробуй иначе. 🐱"
+    except:
+        return "Ошибка! Попробуй другое название. 🐱"
 
 def get_random_anime(genre=None):
     try:
         url = "https://shikimori.one/api/animes"
-        params = {
-            "limit": 50,
-            "order": "random"
-        }
+        params = {"limit": 50, "order": "random"}
         
         if genre:
             genre_map = {
-                "боевик": "action",
-                "экшн": "action",
+                "боевик": "action", "экшн": "action",
                 "романтика": "romance",
                 "комедия": "comedy",
-                "фэнтези": "fantasy",
-                "фентези": "fantasy",
+                "фэнтези": "fantasy", "фентези": "fantasy",
                 "драма": "drama",
-                "ужасы": "horror",
-                "фантастика": "sci-fi"
+                "ужасы": "horror", "хоррор": "horror",
+                "фантастика": "sci-fi",
+                "триллер": "thriller",
+                "детектив": "detective",
+                "меха": "mecha",
+                "повседневность": "slice of life",
+                "психологическое": "psychological",
+                "историческое": "historical",
+                "приключения": "adventure",
+                "мистика": "mystery",
+                "спорт": "sports",
+                "гарем": "harem",
+                "этти": "ecchi",
+                "школа": "school",
+                "киберпанк": "cyberpunk",
+                "военное": "military"
             }
             params["genre"] = genre_map.get(genre.lower(), genre.lower())
         
         response = requests.get(url, params=params, timeout=10)
-        
         if response.status_code == 200:
             data = response.json()
             if data:
@@ -154,7 +270,7 @@ def get_random_anime(genre=None):
                 year = anime.get("released_on", "Неизвестно")[:4] if anime.get("released_on") else "Неизвестно"
                 genres = ', '.join([g['name'] for g in anime.get('genres', [])[:3]])
                 
-                return f"""🎲 Мяу! Тебе выпало:
+                return f"""🎲 Тебе выпало:
 
 🎬 «{russian_name}» ({english_name})
 📅 {year} год
@@ -163,37 +279,42 @@ def get_random_anime(genre=None):
 📺 {episodes} эпизодов
 
 Приятного просмотра! 🐱"""
-            else:
-                return "Мяу... Ничего не нашёл. Попробуй другие параметры! 🐱"
-        else:
-            return "Мяу... Ошибка подключения. Попробуй позже! 🐱"
-            
-    except Exception as e:
-        print(f"Ошибка: {e}")
-        return "Мяу... Ошибка! Попробуй ещё раз 🐱"
+        return "Ничего не нашёл... 🐱"
+    except:
+        return "Ошибка! Попробуй ещё раз. 🐱"
 
 def get_top_anime(genre=None, limit=10):
     try:
         url = "https://shikimori.one/api/animes"
-        params = {
-            "limit": limit,
-            "order": "popularity",
-            "status": "released"
-        }
+        params = {"limit": limit, "order": "popularity", "status": "released"}
         
         if genre:
             genre_map = {
-                "боевик": "action",
-                "экшн": "action",
+                "боевик": "action", "экшн": "action",
                 "романтика": "romance",
                 "комедия": "comedy",
                 "фэнтези": "fantasy",
-                "драма": "drama"
+                "драма": "drama",
+                "ужасы": "horror",
+                "фантастика": "sci-fi",
+                "триллер": "thriller",
+                "детектив": "detective",
+                "меха": "mecha",
+                "повседневность": "slice of life",
+                "психологическое": "psychological",
+                "историческое": "historical",
+                "приключения": "adventure",
+                "мистика": "mystery",
+                "спорт": "sports",
+                "гарем": "harem",
+                "этти": "ecchi",
+                "школа": "school",
+                "киберпанк": "cyberpunk",
+                "военное": "military"
             }
             params["genre"] = genre_map.get(genre.lower(), genre.lower())
         
         response = requests.get(url, params=params, timeout=10)
-        
         if response.status_code == 200:
             data = response.json()
             if data:
@@ -207,18 +328,14 @@ def get_top_anime(genre=None, limit=10):
                     name = anime.get("russian", anime.get("name", "Неизвестно"))
                     score = anime.get("score", "?")
                     result += f"{i}. «{name}» — {score}/10 ⭐\n"
-                
-                return result + "\nмяу 🐱"
-        return "Мяу... Не могу получить топ. Попробуй позже! 🐱"
-        
-    except Exception as e:
-        print(f"Ошибка: {e}")
-        return "Мяу... Ошибка! Попробуй ещё раз 🐱"
+                return result + "\n🐱"
+        return "Не могу получить топ. Попробуй позже. 🐱"
+    except:
+        return "Ошибка! Попробуй ещё раз. 🐱"
 
 def ask_mistral(question, user_id, user_name, search_results=None, include_links=False):
     try:
         url = "https://api.mistral.ai/v1/chat/completions"
-        
         headers = {
             "Authorization": f"Bearer {MISTRAL_API_KEY}",
             "Content-Type": "application/json"
@@ -234,30 +351,19 @@ def ask_mistral(question, user_id, user_name, search_results=None, include_links
             context = "\n\n".join([
                 f"📌 {r['title']}\n{r['content']}" for r in search_results[:3]
             ])
-            
             if include_links:
-                enhanced_question = f"""{question}
-
-Информация из интернета:
-{context}
-
-Ответь КРАТКО (2-3 предложения), выскажи своё мнение. В конце добавь ссылки."""
+                enhanced_question = f"{question}\n\nИнформация из интернета:\n{context}\n\nОтветь по делу. В конце добавь ссылки."
             else:
-                enhanced_question = f"""{question}
-
-Информация из интернета:
-{context}
-
-Ответь КРАТКО (2-3 предложения), выскажи своё мнение."""
+                enhanced_question = f"{question}\n\nИнформация из интернета:\n{context}\n\nОтветь по делу."
             messages.append({"role": "user", "content": enhanced_question})
         else:
-            messages.append({"role": "user", "content": f"Ответь КРАТКО (2-3 предложения). {question} В конце обязательно скажи мяу!"})
+            messages.append({"role": "user", "content": question})
 
         payload = {
             "model": "mistral-small-latest",
             "messages": messages,
-            "temperature": 0.8,
-            "max_tokens": 300
+            "temperature": bot_settings["temperature"],
+            "max_tokens": bot_settings["max_tokens"]
         }
         
         response = requests.post(url, headers=headers, json=payload, timeout=45)
@@ -265,110 +371,154 @@ def ask_mistral(question, user_id, user_name, search_results=None, include_links
         if response.status_code == 200:
             data = response.json()
             answer = data['choices'][0]['message']['content']
-            
-            if "мяу" not in answer.lower():
-                answer = answer.rstrip() + " мяу 🐱"
-            
+            if "🐱" not in answer:
+                answer = answer.rstrip() + " 🐱"
             add_to_memory(user_id, "user", question[:200])
             add_to_memory(user_id, "assistant", answer[:500])
-            
             if include_links and search_results:
                 links = "\n\n📌 Источники:\n" + "\n".join([r["url"] for r in search_results[:2]])
                 return answer + links
             return answer
         else:
-            print(f"❌ Ошибка Mistral: {response.status_code}")
             return fallback_response(question, user_id, user_name, search_results, include_links)
-            
     except Exception as e:
-        print(f"❌ Ошибка: {e}")
+        print(f"Ошибка: {e}")
         return fallback_response(question, user_id, user_name, search_results, include_links)
 
 def fallback_response(question, user_id, user_name, search_results=None, include_links=False):
     q = question.lower()
     add_to_memory(user_id, "user", question[:200])
 
+    if "сыграем в города" in q or "игра города" in q or "города игра" in q:
+        return start_city_game(user_id)
+
+    if user_id in city_games:
+        if "сдаюсь" in q or "выйти" in q or "закончить" in q:
+            game = city_games.pop(user_id)
+            return f"Игра окончена! Ты назвал {len(game['used_cities'])} городов. Хорошая игра! 🎮🐱"
+        
+        city_name = q.strip()
+        game = city_games[user_id]
+        
+        is_valid, msg = is_valid_city(city_name, game["last_letter"], game["used_cities"])
+        if not is_valid:
+            return f"{msg} Нужна буква {game['last_letter'].upper()}. 🐱"
+        
+        exists, msg = check_city_exists(city_name)
+        if not exists:
+            return f"{msg}. Попробуй другой город. 🐱"
+        
+        game["used_cities"].append(city_name.lower())
+        next_letter = get_last_letter(city_name)
+        if not next_letter and len(city_name) > 1:
+            next_letter = city_name[-2].lower()
+        game["last_letter"] = next_letter
+        
+        return f"✅ Принято! {city_name}. Теперь тебе на букву {next_letter.upper()}. 🐱"
+
     if search_results:
         if include_links:
-            reply = "Нашёл кое-что интересное! 😸\n\n"
+            reply = "Вот что нашёл:\n\n"
             for r in search_results[:3]:
                 reply += f"📌 {r['title']}\n{r['url']}\n\n"
-            return reply + "Зацени! мяу 🐱"
+            return reply + "🐱"
         else:
-            reply = "Смотри, что нашёл:\n\n"
+            reply = "Вот что нашёл:\n\n"
             for r in search_results[:3]:
                 reply += f"• {r['title']}\n"
-            return reply + "\nХочешь ссылки? Добавь +ссылка! мяу 🐱"
+            return reply + "\nХочешь ссылки? Добавь «+ссылка». 🐱"
 
-    if "как меня зовут" in q or "как меня звать" in q or "моё имя" in q:
-        return f"Мяу! Твоё имя — {user_name}! Разве ты забыл? 😸 мяу 🐱"
+    if "список команд" in q or "команды" in q or "что ты умеешь" in q:
+        return f"""📋 Список команд, {user_name}:
+
+🎬 АНИМЕ:
+• Кот посоветуй аниме — случайное аниме
+• Кот посоветуй (жанр) — боевик, романтика, комедия, фэнтези, драма, ужасы, триллер, детектив, меха, киберпанк и другие
+• Кот найди аниме (название) — поиск по названию
+• Кот топ аниме — топ-10 популярных
+• Кот топ (жанр) — топ-10 по жанру
+
+🎮 ИГРЫ:
+• Кот сыграем в города — игра в города
+
+🌐 ИНТЕРНЕТ:
+• Котопоиск (запрос) — поиск без ссылок
+• Котопоиск +ссылка (запрос) — поиск со ссылками
+
+💬 ОБЩЕНИЕ:
+• Кот привет — поздороваться
+• Кот как дела? — спросить как дела
+• Кот что я говорил — показать историю
+• Кот забудь всё — очистить память
+
+⚙️ НАСТРОЙКИ (только для хозяина):
+• кот показать настройки
+• кот макс токенов (число)
+• кот температура (число)
+• кот режим краткий / подробный / нормальный
+
+😴 СОН (только для хозяина):
+• Кот спать — усыпить кота
+• Кот проснись — разбудить кота
+
+🐱"""
     
-    if "посоветуй аниме" in q or "рекомендуй аниме" in q:
-        for genre in ["боевик", "романтика", "комедия", "фэнтези", "драма", "ужасы"]:
+    if "посоветуй аниме" in q:
+        genres_list = ["боевик", "романтика", "комедия", "фэнтези", "драма", "ужасы", 
+                       "фантастика", "триллер", "детектив", "меха", "повседневность", 
+                       "психологическое", "историческое", "приключения", "мистика", 
+                       "спорт", "гарем", "этти", "школа", "киберпанк", "военное"]
+        for genre in genres_list:
             if genre in q:
                 return get_random_anime(genre=genre)
         return get_random_anime()
     
     elif "топ" in q and "аниме" in q:
-        for genre in ["боевик", "романтика", "комедия", "фэнтези", "драма"]:
+        genres_list = ["боевик", "романтика", "комедия", "фэнтези", "драма", "ужасы", 
+                       "фантастика", "триллер", "детектив", "меха", "повседневность", 
+                       "психологическое", "историческое", "приключения", "мистика", 
+                       "спорт", "гарем", "этти", "школа", "киберпанк", "военное"]
+        for genre in genres_list:
             if genre in q:
                 return get_top_anime(genre=genre)
         return get_top_anime()
     
-    elif "найди аниме" in q or "найти аниме" in q:
+    elif "найди аниме" in q:
         anime_name = re.sub(r'найди аниме|найти аниме', '', q).strip()
         if anime_name:
             return search_anime_by_name(anime_name)
-        return "Мяу! Напиши название аниме, которое хочешь найти! 🐱"
+        return "Напиши название аниме после команды. 🐱"
     
     elif "забудь" in q or "очисти память" in q:
         return clear_memory(user_id)
-    elif "что я говорил" in q:
+    
+    elif "что я говорил" in q or "что я спрашивал" in q:
         history = get_user_memory(user_id)
         if not history:
-            return "Мы ещё не болтали! Напиши что-нибудь 😸 мяу 🐱"
-        result = "Ты спрашивал:\n\n"
+            return "Мы ещё не разговаривали! Напиши что-нибудь. 🐱"
+        result = "📝 Недавно ты спрашивал:\n"
         for msg in history[-5:]:
             if msg["role"] == "user":
                 result += f"• {msg['content'][:80]}...\n"
-        return result + "\nА теперь о чём поговорим? мяу 🐱"
-    elif "привет" in q:
-        return random.choice([
-            f"Мур-мяу! Привет, {user_name}! Как настроение? 😸 мяу 🐱",
-            f"О, привет, {user_name}! Давно ждал! Что нового? мяу 🐱",
-            f"Мяу! Привет-привет, {user_name}! Рад тебя видеть! 😺 мяу 🐱"
-        ])
-    elif "как дела" in q:
-        return random.choice([
-            f"Мурлычу отлично, {user_name}! А у тебя? мяу 🐱",
-            f"Замечательно, {user_name}! Солнышко, тепло, и ты рядом! мяу 😸",
-            f"Отлично, {user_name}! Жду твоих вопросов! мяу 🐱"
-        ])
+        return result + "🐱"
+    
+    elif "привет" in q or "здарова" in q:
+        return f"Привет, {user_name}! Как настроение? 🐱"
+    
+    elif "как дела" in q or "как ты" in q:
+        return f"Мурлычу отлично, {user_name}! Греюсь на солнышке ☀️ А у тебя? 🐱"
+    
     elif "кто ты" in q:
-        return f"Я Кот! Твой пушистый друг, {user_name}. Люблю аниме, болтать и узнавать новое. А ты? мяу 🐱"
-    elif "что ты умеешь" in q:
-        return f"""Умею, {user_name}:
-• Болтать как друг
-• Искать в интернете: «Котопоиск что-то»
-• Советовать аниме: «Кот посоветуй аниме»
-• Находить аниме: «Кот найди аниме Название»
-• Показывать топ: «Кот топ аниме»
-• Запоминать разговоры
-• А ещё я знаю твоё имя! Напиши «как меня зовут» 😸
-
-Спрашивай что хочешь! мяу 🐱"""
+        return f"Я Кот! Твой пушистый друг и собеседник, {user_name}. Напиши «список команд» чтобы узнать, что я умею. 🐱"
+    
     elif "спасибо" in q:
-        return random.choice([
-            f"Мур-мяу, {user_name}! Всегда пожалуйста! 😊 мяу 🐱",
-            f"Ой, мне приятно, {user_name}! Обращайся! мяу 🐱"
-        ])
-    elif "пока" in q:
-        return random.choice([
-            f"Пока-пока, {user_name}! Заходи ещё! мяу 🐱👋",
-            f"До встречи, {user_name}! Хорошего дня! мяу 🐱"
-        ])
+        return f"Пожалуйста, {user_name}! Всегда рад помочь. 🐱"
+    
+    elif "пока" in q or "до свидания" in q:
+        return f"Пока, {user_name}! Заходи ещё, поболтаем. 🐱👋"
+    
     else:
-        return f"Интересный вопрос, {user_name}! 😸 Расскажи подробнее, а я посоветую что-нибудь!\n\nПопробуй:\n• Кот посоветуй аниме\n• Кот найди аниме Киберпанк\n• Кот топ аниме\n• Котопоиск новости\n• как меня зовут\nмяу 🐱"
+        return f"Не совсем понял, {user_name}. Напиши «список команд» чтобы увидеть, что я умею. 🐱"
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
@@ -387,39 +537,39 @@ def handle_message(message):
     
     if "мой айди" in text_lower or "мой id" in text_lower:
         username = message.from_user.username if message.from_user.username else "нет"
-        bot.reply_to(message, f"📌 Твой ID: `{user_id}`\n📌 Твоё имя: {user_name}\n📌 Username: @{username}\n\nID этого чата: `{chat_id}`\n\nДобавь chat_id в ALLOWED_CHATS, если хочешь чтобы бот работал здесь! мяу 🐱", parse_mode="Markdown")
+        bot.reply_to(message, f"📌 Твой ID: `{user_id}`\n📌 Имя: {user_name}\n📌 Username: @{username}\n📌 Чат ID: `{chat_id}`\n🐱", parse_mode="Markdown")
         return
+    
+    if any(x in text_lower for x in ["макс токенов", "max_tokens", "температура", "temp", 
+                                      "режим краткий", "режим подробный", "режим нормальный", 
+           "показать настройки", "настройки"]):
+        result = handle_settings(user_id, text_lower)
+        if result:
+            bot.reply_to(message, result)
+            return
     
     if "кот спать" in text_lower:
         if is_master(user_id):
             is_sleeping = True
-            bot.reply_to(message, random.choice([
-                f"Мяу-мяу... Спокойной ночи, {user_name}! 😴 Кот уснул... мяу 🐱",
-                f"Зеваю... Укладываюсь спать, {user_name}... 😴 мяу 🐱",
-                f"Спатки? Хорошо, {user_name}... Всем спокойных снов... 😴 мяу 🐱"
-            ]))
+            bot.reply_to(message, f"Спокойной ночи, {user_name}! 😴🐱")
         else:
-            bot.reply_to(message, f"Мяу... {user_name}, только мой хозяин может меня усыплять! 😾 мяу 🐱")
+            bot.reply_to(message, f"Мяу... {user_name}, только хозяин может меня усыплять. 🐱")
         return
     
     if "кот проснись" in text_lower:
         if is_master(user_id):
             is_sleeping = False
-            bot.reply_to(message, random.choice([
-                f"Мяу-мяу! Доброе утро, {user_name}! Кот проснулся! ☀️ мяу 🐱",
-                f"Мур... уже утро? Потягушки! Доброе утро, {user_name}! 😸 мяу 🐱",
-                f"Проснулся! Слышу голос {user_name}! Всем привет! мяу 🐱"
-            ]))
+            bot.reply_to(message, f"Доброе утро, {user_name}! Выспался отлично! ☀️🐱")
         else:
-            bot.reply_to(message, f"Мяу... {user_name}, только мой хозяин может меня будить! 😾 мяу 🐱")
+            bot.reply_to(message, f"Мяу... {user_name}, только хозяин может меня будить. 🐱")
         return
     
     if is_sleeping:
         if random.random() < 0.1:
             bot.reply_to(message, random.choice([
-                f"Мур... сплю, {user_name}... не мешай... 😴 мяу",
-                f"Ззз... позже, {user_name}... кот спит... 😴 мяу",
-                f"Храп-храп... утром приходи, {user_name}... 😴 мяу"
+                f"Мур... сплю, {user_name}... 😴🐱",
+                f"Ззз... 🐱",
+                f"Утром приходи... 🐱"
             ]))
         return
     
@@ -428,22 +578,22 @@ def handle_message(message):
         user_query = re.sub(r'котопоиск|\+ссылка', '', text_lower).strip()
         
         if not user_query:
-            bot.reply_to(message, f"Мяу! {user_name}, напиши что искать! Например: «Котопоиск новости» 🔍 мяу 🐱")
+            bot.reply_to(message, f"Напиши что искать, {user_name}! Например: «Котопоиск новости» 🐱")
             return
         
         bot.send_chat_action(message.chat.id, "typing")
-        status_msg = bot.send_message(message.chat.id, "🔍 Мяу... ищу...")
+        status_msg = bot.send_message(message.chat.id, "🔍 Ищу...")
         search_results = search_web(user_query)
         
         if search_results:
-            bot.edit_message_text("💭 Нашёл кое-что! Сейчас расскажу...", message.chat.id, status_msg.message_id)
+            bot.edit_message_text("💭 Думаю...", message.chat.id, status_msg.message_id)
             answer = ask_mistral(user_query, user_id, user_name, search_results, include_links)
             bot.delete_message(message.chat.id, status_msg.message_id)
         else:
-            bot.edit_message_text("😿 Ничего не нашёл... Попробуй по-другому!", message.chat.id, status_msg.message_id)
+            bot.edit_message_text("😿 Ничего не нашёл...", message.chat.id, status_msg.message_id)
             time.sleep(2)
             bot.delete_message(message.chat.id, status_msg.message_id)
-            answer = "Ничего не нашёл! Может, переформулируем? мяу 🐱"
+            answer = f"Ничего не нашёл по запросу, {user_name}. Попробуй переформулировать. 🐱"
         
         bot.reply_to(message, answer)
         return
@@ -455,7 +605,7 @@ def handle_message(message):
             user_query = re.sub(r'[Кк]от[,\s]?', '', text).strip()
         
         if not user_query:
-            bot.reply_to(message, f"Мяу? Я слушаю, {user_name}! 😸\n\nНапиши что-нибудь:\n• Кот привет\n• Кот посоветуй аниме\n• Кот найди аниме Киберпанк\n• Кот топ боевиков\n• Котопоиск новости\n• Кот что я говорил\n• как меня зовут\n\nЖду! мяу 🐱")
+            bot.reply_to(message, f"Я слушаю, {user_name}! 😸\n\nНапиши «список команд» чтобы увидеть, что я умею. 🐱")
             return
         
         bot.send_chat_action(message.chat.id, "typing")
@@ -464,28 +614,19 @@ def handle_message(message):
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("🐱 КОТ-БОТ С SHIKIMORI API ЗАПУЩЕН!")
+    print("🐱 КОТ-БОТ ЗАПУЩЕН!")
     print("=" * 50)
     print(f"Бот: @{bot.get_me().username}")
     print(f"Хозяин ID: {MASTER_USER_ID}")
     print(f"Разрешённые чаты: {ALLOWED_CHATS}")
-    print("\nАНИМЕ-КОМАНДЫ:")
+    print(f"Режим: подробный | Токены: 4000 | Температура: 0.9")
+    print("\nКОМАНДЫ:")
+    print("• список команд — показать все команды")
     print("• Кот посоветуй аниме — случайное аниме")
-    print("• Кот посоветуй боевик — случайный боевик")
-    print("• Кот найди аниме Название — поиск по названию")
-    print("• Кот топ аниме — топ-10 популярных")
-    print("\nПОИСК В ИНТЕРНЕТЕ:")
-    print("• Котопоиск новости — без ссылок")
-    print("• Котопоиск +ссылка новости — со ссылками")
-    print("\nОБЩЕНИЕ:")
-    print("• Кот привет")
-    print("• Кот как дела?")
-    print("• как меня зовут — узнать своё имя")
-    print("• Кот что я говорил — память")
-    print("• Кот забудь всё — очистить память")
-    print("\nСОН (только для хозяина):")
-    print("• Кот спать")
-    print("• Кот проснись")
+    print("• Кот найди аниме Название — поиск")
+    print("• Кот топ аниме — топ-10")
+    print("• Кот сыграем в города — игра")
+    print("• Котопоиск новости — поиск в интернете")
     print("=" * 50)
     
     while True:
