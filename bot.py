@@ -129,10 +129,12 @@ def get_random_anime(genre=None):
         
         if genre:
             genre_map = {
-                "боевик": "action", "экшн": "action",
+                "боевик": "action",
+                "экшн": "action",
                 "романтика": "romance",
                 "комедия": "comedy",
-                "фэнтези": "fantasy", "фентези": "fantasy",
+                "фэнтези": "fantasy",
+                "фентези": "fantasy",
                 "драма": "drama",
                 "ужасы": "horror",
                 "фантастика": "sci-fi"
