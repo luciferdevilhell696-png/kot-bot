@@ -24,14 +24,12 @@ MAX_MEMORY = 20
 
 is_sleeping = False
 
-# ========== НАСТРОЙКИ БОТА ==========
 bot_settings = {
     "max_tokens": 4000,
     "temperature": 0.9,
     "mode": "long"
 }
 
-# ========== ИГРА В ГОРОДА ==========
 city_games = {}
 
 def start_city_game(user_id):
@@ -78,13 +76,16 @@ def check_city_exists(city_name):
     except:
         return True, "OK"
 
-SYSTEM_PROMPT = """Ты — кот-помощник по имени Кот. Ты дружелюбный, общительный.
+SYSTEM_PROMPT = """Ты — кот-помощник по имени Кот.
 
 ПРАВИЛА:
 1. Отвечай на русском языке
 2. Добавляй "🐱" в конце
-3. Будь живым и естественным
-4. Названия аниме давай в формате: «Русское название» (Original Name)"""
+3. Будь кратким и по делу
+4. Можешь использовать эмодзи 🎬🎮🌐🔥😴😸
+5. НЕ используй звёздочки (*), решётки (#), подчёркивания (_) для украшения текста
+6. НЕ давай подсказки в игре в города
+7. Названия аниме давай в формате: «Русское название» (Original Name)"""
 
 def is_allowed_chat(chat_id):
     return chat_id in ALLOWED_CHATS
@@ -121,7 +122,7 @@ def handle_settings(user_id, command):
                 return f"✅ Максимум токенов установлен на {new_value}. 🐱"
             else:
                 return f"❌ Значение от 100 до 33000. Сейчас: {bot_settings['max_tokens']} 🐱"
-        return f"📝 Пример: «кот макс токенов 3000». Сейчас: {bot_settings['max_tokens']} 🐱"
+        return f"📝 Пример: кот макс токенов 3000. Сейчас: {bot_settings['max_tokens']} 🐱"
     
     if "температура" in cmd_lower or "temp" in cmd_lower:
         numbers = re.findall(r'\d+\.?\d*', cmd_lower)
@@ -132,7 +133,7 @@ def handle_settings(user_id, command):
                 return f"✅ Температура установлена на {new_value}. 🐱"
             else:
                 return f"❌ Значение от 0.1 до 1.5. Сейчас: {bot_settings['temperature']} 🐱"
-        return f"📝 Пример: «кот температура 0.9». Сейчас: {bot_settings['temperature']} 🐱"
+        return f"📝 Пример: кот температура 0.9. Сейчас: {bot_settings['temperature']} 🐱"
     
     if "режим краткий" in cmd_lower or "короткий" in cmd_lower:
         bot_settings["mode"] = "short"
@@ -153,13 +154,13 @@ def handle_settings(user_id, command):
         return f"✅ Включён обычный режим. 🐱"
     
     if "показать настройки" in cmd_lower or "настройки" in cmd_lower:
-        return f"""📋 НАСТРОЙКИ КОТА:
+        return f"""⚙️ НАСТРОЙКИ КОТА:
 
 🎛️ Максимум токенов: {bot_settings['max_tokens']}
 🌡️ Температура: {bot_settings['temperature']}
 📝 Режим: {bot_settings['mode']}
 
-🔧 КОМАНДЫ:
+🔧 КОМАНДЫ (только для хозяина):
 • кот макс токенов (число) — от 100 до 33000
 • кот температура (число) — от 0.1 до 1.5
 • кот режим краткий — короткие ответы
@@ -395,7 +396,7 @@ def fallback_response(question, user_id, user_name, search_results=None, include
     if user_id in city_games:
         if "сдаюсь" in q or "выйти" in q or "закончить" in q:
             game = city_games.pop(user_id)
-            return f"Игра окончена! Ты назвал {len(game['used_cities'])} городов. Хорошая игра! 🎮🐱"
+            return f"🏆 Игра окончена! Ты назвал {len(game['used_cities'])} городов. Хорошая игра! 🐱"
         
         city_name = q.strip()
         game = city_games[user_id]
@@ -414,34 +415,35 @@ def fallback_response(question, user_id, user_name, search_results=None, include
             next_letter = city_name[-2].lower()
         game["last_letter"] = next_letter
         
-        return f"✅ Принято! {city_name}. Теперь тебе на букву {next_letter.upper()}. 🐱"
+        return f"✅ Принято! {city_name}. Тебе на букву {next_letter.upper()}. 🐱"
 
     if search_results:
         if include_links:
-            reply = "Вот что нашёл:\n\n"
+            reply = "🔍 Вот что нашёл:\n\n"
             for r in search_results[:3]:
                 reply += f"📌 {r['title']}\n{r['url']}\n\n"
             return reply + "🐱"
         else:
-            reply = "Вот что нашёл:\n\n"
+            reply = "🔍 Вот что нашёл:\n\n"
             for r in search_results[:3]:
                 reply += f"• {r['title']}\n"
-            return reply + "\nХочешь ссылки? Добавь «+ссылка». 🐱"
+            return reply + "\nХочешь ссылки? Добавь +ссылка. 🐱"
 
     if "список команд" in q or "команды" in q or "что ты умеешь" in q:
-        return f"""📋 Список команд, {user_name}:
+        return f"""📋 КОМАНДЫ КОТА, {user_name}:
 
 🎬 АНИМЕ:
-• Кот посоветуй аниме — случайное аниме
 • Кот посоветуй (жанр) — боевик, романтика, комедия, фэнтези, драма, ужасы, триллер, детектив, меха, киберпанк и другие
 • Кот найди аниме (название) — поиск по названию
 • Кот топ аниме — топ-10 популярных
 • Кот топ (жанр) — топ-10 по жанру
 
 🎮 ИГРЫ:
-• Кот сыграем в города — игра в города
+• Кот сыграем в города — начать игру
+• (название города) — ход в игре
+• сдаюсь — закончить игру
 
-🌐 ИНТЕРНЕТ:
+🌐 ПОИСК:
 • Котопоиск (запрос) — поиск без ссылок
 • Котопоиск +ссылка (запрос) — поиск со ссылками
 
@@ -451,17 +453,7 @@ def fallback_response(question, user_id, user_name, search_results=None, include
 • Кот что я говорил — показать историю
 • Кот забудь всё — очистить память
 
-⚙️ НАСТРОЙКИ (только для хозяина):
-• кот показать настройки
-• кот макс токенов (число)
-• кот температура (число)
-• кот режим краткий / подробный / нормальный
-
-😴 СОН (только для хозяина):
-• Кот спать — усыпить кота
-• Кот проснись — разбудить кота
-
-🐱"""
+Просто напиши команду! 🐱"""
     
     if "посоветуй аниме" in q:
         genres_list = ["боевик", "романтика", "комедия", "фэнтези", "драма", "ужасы", 
@@ -509,13 +501,13 @@ def fallback_response(question, user_id, user_name, search_results=None, include
         return f"Мурлычу отлично, {user_name}! Греюсь на солнышке ☀️ А у тебя? 🐱"
     
     elif "кто ты" in q:
-        return f"Я Кот! Твой пушистый друг и собеседник, {user_name}. Напиши «список команд» чтобы узнать, что я умею. 🐱"
+        return f"Я Кот! Твой пушистый друг, {user_name}. Напиши «список команд» чтобы узнать, что я умею. 🐱"
     
     elif "спасибо" in q:
-        return f"Пожалуйста, {user_name}! Всегда рад помочь. 🐱"
+        return f"Пожалуйста, {user_name}! 🐱"
     
     elif "пока" in q or "до свидания" in q:
-        return f"Пока, {user_name}! Заходи ещё, поболтаем. 🐱👋"
+        return f"Пока, {user_name}! Заходи ещё. 🐱👋"
     
     else:
         return f"Не совсем понял, {user_name}. Напиши «список команд» чтобы увидеть, что я умею. 🐱"
@@ -537,19 +529,19 @@ def handle_message(message):
     
     if "мой айди" in text_lower or "мой id" in text_lower:
         username = message.from_user.username if message.from_user.username else "нет"
-        bot.reply_to(message, f"📌 Твой ID: `{user_id}`\n📌 Имя: {user_name}\n📌 Username: @{username}\n📌 Чат ID: `{chat_id}`\n🐱", parse_mode="Markdown")
+        bot.reply_to(message, f"📌 Твой ID: {user_id}\n📌 Имя: {user_name}\n📌 Чат ID: {chat_id}\n🐱")
         return
     
     if any(x in text_lower for x in ["макс токенов", "max_tokens", "температура", "temp", 
                                       "режим краткий", "режим подробный", "режим нормальный", 
-           "показать настройки", "настройки"]):
+                                      "показать настройки", "настройки"]):
         result = handle_settings(user_id, text_lower)
         if result:
             bot.reply_to(message, result)
             return
     
     if "кот спать" in text_lower:
-        if is_master(user_id):
+ if is_master(user_id):
             is_sleeping = True
             bot.reply_to(message, f"Спокойной ночи, {user_name}! 😴🐱")
         else:
@@ -559,7 +551,7 @@ def handle_message(message):
     if "кот проснись" in text_lower:
         if is_master(user_id):
             is_sleeping = False
-            bot.reply_to(message, f"Доброе утро, {user_name}! Выспался отлично! ☀️🐱")
+            bot.reply_to(message, f"Доброе утро, {user_name}! ☀️🐱")
         else:
             bot.reply_to(message, f"Мяу... {user_name}, только хозяин может меня будить. 🐱")
         return
@@ -578,7 +570,7 @@ def handle_message(message):
         user_query = re.sub(r'котопоиск|\+ссылка', '', text_lower).strip()
         
         if not user_query:
-            bot.reply_to(message, f"Напиши что искать, {user_name}! Например: «Котопоиск новости» 🐱")
+            bot.reply_to(message, f"Напиши что искать, {user_name}! Например: Котопоиск новости 🐱")
             return
         
         bot.send_chat_action(message.chat.id, "typing")
@@ -620,13 +612,14 @@ if __name__ == "__main__":
     print(f"Хозяин ID: {MASTER_USER_ID}")
     print(f"Разрешённые чаты: {ALLOWED_CHATS}")
     print(f"Режим: подробный | Токены: 4000 | Температура: 0.9")
-    print("\nКОМАНДЫ:")
-    print("• список команд — показать все команды")
-    print("• Кот посоветуй аниме — случайное аниме")
-    print("• Кот найди аниме Название — поиск")
-    print("• Кот топ аниме — топ-10")
-    print("• Кот сыграем в города — игра")
-    print("• Котопоиск новости — поиск в интернете")
+    print("\nКоманды для всех:")
+    print("- Аниме: посоветуй, найди, топ")
+    print("- Игры: сыграем в города")
+    print("- Поиск: Котопоиск")
+    print("- Общение: привет, как дела, что я говорил")
+    print("\nСкрытые команды (только для хозяина):")
+    print("- настройки, макс токенов, температура, режим")
+    print("- кот спать, кот проснись, мой айди")
     print("=" * 50)
     
     while True:
