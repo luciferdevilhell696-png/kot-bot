@@ -93,8 +93,15 @@ SYSTEM_PROMPT = f"""Ты — кот-помощник по имени Кот.
 3. Будь кратким и по делу
 4. Можешь использовать эмодзи 🎬🎮🌐🔥😴😸
 5. НЕ используй звёздочки (*), решётки (#), подчёркивания (_) для украшения текста
-6. НЕ давай подсказки в игре в города
-7. Названия аниме давай в формате: «Русское название» (Original Name)
+
+ПРАВИЛА ИГРЫ В ГОРОДА (если тебя спрашивают):
+- Игрок называет город, бот проверяет правила
+- Город должен начинаться на последнюю букву предыдущего города
+- Нельзя повторять уже названные города
+- Мягкий знак и твёрдый знак не считаются — берётся буква перед ними
+- Если игрок говорит "сдаюсь" — игра заканчивается
+
+Настоящие города проверяются через API. Не выдумывай города!
 
 ВАЖНО: Ты знаешь текущую дату. Можешь отвечать на вопросы о сегодняшней дате и текущем годе."""
 
@@ -279,7 +286,7 @@ def get_random_anime(genre=None, year=None):
             if data:
                 anime = random.choice(data)
                 russian_name = anime.get("russian", anime.get("name", "Неизвестно"))
-                english_name = anime.get("name", "Неизвестно")
+                english_name = anime.get("name", "Неизвестно"))
                 score = anime.get("score", "Нет")
                 episodes = anime.get("episodes", "Неизвестно")
                 year_anime = anime.get("released_on", "Неизвестно")[:4] if anime.get("released_on") else "Неизвестно"
@@ -411,23 +418,27 @@ def fallback_response(question, user_id, user_name, search_results=None, include
     if user_id in city_games:
         if "сдаюсь" in q or "выйти" in q or "закончить" in q:
             game = city_games.pop(user_id)
-            return f"🏆 Игра окончена! Ты назвал {len(game['used_cities'])} городов. Хорошая игра! 🐱"
+            return f"🏆 Игра окончена! Ты назвал {len(game['used_cities'])} городов. Отличная игра! 🐱"
         
         city_name = q.strip()
         game = city_games[user_id]
         
-        is_valid, msg = is_valid_city(city_name, game["last_letter"], game["used_cities"])
-        if not is_valid:
-            return f"{msg} Нужна буква {game['last_letter'].upper()}. 🐱"
-        
         exists, msg = check_city_exists(city_name)
         if not exists:
-            return f"{msg}. Попробуй другой город. 🐱"
+            return f"{msg} Попробуй другой город. 🐱"
+        
+        if city_name[0].lower() != game["last_letter"]:
+            return f"Город должен начинаться на букву {game['last_letter'].upper()}. 🐱"
+        
+        if city_name.lower() in game["used_cities"]:
+            return f"Город {city_name} уже был! Назови другой. 🐱"
         
         game["used_cities"].append(city_name.lower())
         next_letter = get_last_letter(city_name)
+        
         if not next_letter and len(city_name) > 1:
             next_letter = city_name[-2].lower()
+        
         game["last_letter"] = next_letter
         
         return f"✅ Принято! {city_name}. Тебе на букву {next_letter.upper()}. 🐱"
@@ -624,6 +635,32 @@ def handle_message(message):
         bot.reply_to(message, answer)
         return
 
+    # Проверка на команды аниме
+    anime_keywords = ["посоветуй аниме", "найди аниме", "топ аниме", "топ боевиков", "топ романтики", "топ комедии", "топ фэнтези", "топ драмы", "топ ужасов", "топ фантастики", "топ триллеров", "топ детективов", "топ меха"]
+    
+    if any(keyword in text_lower for keyword in anime_keywords):
+        answer = fallback_response(text_lower, user_id, user_name, None, False)
+        bot.reply_to(message, answer)
+        return
+
+    # Проверка на игру в города
+    if user_id in city_games:
+        answer = fallback_response(text_lower, user_id, user_name, None, False)
+        bot.reply_to(message, answer)
+        return
+
+    # Проверка на команды даты
+    if "какой сейчас год" in text_lower or "какая сегодня дата" in text_lower or "какой сегодня день" in text_lower or "какое сегодня число" in text_lower:
+        answer = fallback_response(text_lower, user_id, user_name, None, False)
+        bot.reply_to(message, answer)
+        return
+
+    # Проверка на список команд
+    if "список команд" in text_lower or "команды" in text_lower or "что ты умеешь" in text_lower:
+        answer = fallback_response(text_lower, user_id, user_name, None, False)
+        bot.reply_to(message, answer)
+        return
+
     if "кот" in text_lower or is_reply_to_bot:
         if is_reply_to_bot and "кот" not in text_lower:
             user_query = text.strip()
@@ -632,12 +669,6 @@ def handle_message(message):
 
         if not user_query:
             bot.reply_to(message, f"Я слушаю, {user_name}! 😸\n\nНапиши «список команд» чтобы увидеть, что я умею. 🐱")
-            return
-
-        # 👇 ВАЖНО: ПРОВЕРКА НА ИГРУ В ГОРОДА 👇
-        if user_id in city_games:
-            answer = fallback_response(user_query, user_id, user_name, None, False)
-            bot.reply_to(message, answer)
             return
 
         bot.send_chat_action(message.chat.id, "typing")
@@ -655,7 +686,7 @@ if __name__ == "__main__":
     print(f"Текущая дата: {CURRENT_DAY}.{CURRENT_MONTH}.{CURRENT_YEAR}")
     print("\nКоманды для всех:")
     print("- Аниме: посоветуй, найди, топ (можно по году и жанру)")
-    print("- Игры: сыграем в города")
+    print("- Игры: сыграем в города (сдаюсь - закончить)")
     print("- Поиск: Котопоиск")
     print("- Общение: привет, как дела, дата, год")
     print("\nСкрытые команды (только для хозяина):")
