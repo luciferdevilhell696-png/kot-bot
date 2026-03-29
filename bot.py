@@ -515,47 +515,47 @@ def fallback_response(question, user_id, user_name, search_results=None, include
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     global is_sleeping
-    
+
     chat_id = message.chat.id
     user_id = message.from_user.id
     user_name = message.from_user.first_name
     text = message.text or ""
     text_lower = text.lower()
     is_reply_to_bot = (message.reply_to_message and message.reply_to_message.from_user.id == bot.get_me().id)
-    
+
     if not is_allowed_chat(chat_id):
         print(f"❌ Заблокирован чат: {chat_id}")
         return
-    
+
     if "мой айди" in text_lower or "мой id" in text_lower:
         username = message.from_user.username if message.from_user.username else "нет"
         bot.reply_to(message, f"📌 Твой ID: {user_id}\n📌 Имя: {user_name}\n📌 Чат ID: {chat_id}\n🐱")
         return
-    
-    if any(x in text_lower for x in ["макс токенов", "max_tokens", "температура", "temp", 
-                                      "режим краткий", "режим подробный", "режим нормальный", 
+
+    if any(x in text_lower for x in ["макс токенов", "max_tokens", "температура", "temp",
+                                      "режим краткий", "режим подробный", "режим нормальный",
                                       "показать настройки", "настройки"]):
         result = handle_settings(user_id, text_lower)
         if result:
             bot.reply_to(message, result)
             return
-    
+
     if "кот спать" in text_lower:
- if is_master(user_id):
+        if is_master(user_id):
             is_sleeping = True
             bot.reply_to(message, f"Спокойной ночи, {user_name}! 😴🐱")
         else:
-            bot.reply_to(message, f"Мяу... {user_name}, только хозяин может меня усыплять. 🐱")
+            bot.reply_to(message, f"Только хозяин может меня усыплять. 🐱")
         return
-    
+
     if "кот проснись" in text_lower:
         if is_master(user_id):
             is_sleeping = False
             bot.reply_to(message, f"Доброе утро, {user_name}! ☀️🐱")
         else:
-            bot.reply_to(message, f"Мяу... {user_name}, только хозяин может меня будить. 🐱")
+            bot.reply_to(message, f"Только хозяин может меня будить. 🐱")
         return
-    
+
     if is_sleeping:
         if random.random() < 0.1:
             bot.reply_to(message, random.choice([
@@ -564,19 +564,19 @@ def handle_message(message):
                 f"Утром приходи... 🐱"
             ]))
         return
-    
+
     if "котопоиск" in text_lower:
         include_links = "+ссылка" in text_lower
         user_query = re.sub(r'котопоиск|\+ссылка', '', text_lower).strip()
-        
+
         if not user_query:
             bot.reply_to(message, f"Напиши что искать, {user_name}! Например: Котопоиск новости 🐱")
             return
-        
+
         bot.send_chat_action(message.chat.id, "typing")
         status_msg = bot.send_message(message.chat.id, "🔍 Ищу...")
         search_results = search_web(user_query)
-        
+
         if search_results:
             bot.edit_message_text("💭 Думаю...", message.chat.id, status_msg.message_id)
             answer = ask_mistral(user_query, user_id, user_name, search_results, include_links)
@@ -586,20 +586,20 @@ def handle_message(message):
             time.sleep(2)
             bot.delete_message(message.chat.id, status_msg.message_id)
             answer = f"Ничего не нашёл по запросу, {user_name}. Попробуй переформулировать. 🐱"
-        
+
         bot.reply_to(message, answer)
         return
-    
+
     if "кот" in text_lower or is_reply_to_bot:
         if is_reply_to_bot and "кот" not in text_lower:
             user_query = text.strip()
         else:
             user_query = re.sub(r'[Кк]от[,\s]?', '', text).strip()
-        
+
         if not user_query:
             bot.reply_to(message, f"Я слушаю, {user_name}! 😸\n\nНапиши «список команд» чтобы увидеть, что я умею. 🐱")
             return
-        
+
         bot.send_chat_action(message.chat.id, "typing")
         answer = ask_mistral(user_query, user_id, user_name, None, False)
         bot.reply_to(message, answer)
@@ -621,7 +621,7 @@ if __name__ == "__main__":
     print("- настройки, макс токенов, температура, режим")
     print("- кот спать, кот проснись, мой айди")
     print("=" * 50)
-    
+
     while True:
         try:
             bot.infinity_polling(timeout=60, long_polling_timeout=60)
