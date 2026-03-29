@@ -286,7 +286,7 @@ def get_random_anime(genre=None, year=None):
             if data:
                 anime = random.choice(data)
                 russian_name = anime.get("russian", anime.get("name", "Неизвестно"))
-                english_name = anime.get("name", "Неизвестно"))
+                english_name = anime.get("name", "Неизвестно")
                 score = anime.get("score", "Нет")
                 episodes = anime.get("episodes", "Неизвестно")
                 year_anime = anime.get("released_on", "Неизвестно")[:4] if anime.get("released_on") else "Неизвестно"
