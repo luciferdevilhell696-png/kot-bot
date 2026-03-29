@@ -4,6 +4,7 @@ import re
 import time
 from collections import defaultdict
 import random
+import datetime
 
 TELEGRAM_TOKEN = "8785895690:AAFjNx1sMzJvjPgo6G5Qe-qSz5-E4QkN1_A"
 MISTRAL_API_KEY = "I9PvXEOaGCsaAvjfMcPLSF0P5FrdmQJ9"
@@ -31,6 +32,12 @@ bot_settings = {
 }
 
 city_games = {}
+
+def get_current_date():
+    now = datetime.datetime.now()
+    return now.year, now.month, now.day
+
+CURRENT_YEAR, CURRENT_MONTH, CURRENT_DAY = get_current_date()
 
 def start_city_game(user_id):
     start_cities = ["Москва", "Казань", "Сочи", "Омск", "Уфа", "Псков", "Волгоград"]
@@ -76,7 +83,9 @@ def check_city_exists(city_name):
     except:
         return True, "OK"
 
-SYSTEM_PROMPT = """Ты — кот-помощник по имени Кот.
+SYSTEM_PROMPT = f"""Ты — кот-помощник по имени Кот.
+
+ТЕКУЩАЯ ДАТА: {CURRENT_DAY}.{CURRENT_MONTH}.{CURRENT_YEAR}
 
 ПРАВИЛА:
 1. Отвечай на русском языке
@@ -85,7 +94,9 @@ SYSTEM_PROMPT = """Ты — кот-помощник по имени Кот.
 4. Можешь использовать эмодзи 🎬🎮🌐🔥😴😸
 5. НЕ используй звёздочки (*), решётки (#), подчёркивания (_) для украшения текста
 6. НЕ давай подсказки в игре в города
-7. Названия аниме давай в формате: «Русское название» (Original Name)"""
+7. Названия аниме давай в формате: «Русское название» (Original Name)
+
+ВАЖНО: Ты знаешь текущую дату. Можешь отвечать на вопросы о сегодняшней дате и текущем годе."""
 
 def is_allowed_chat(chat_id):
     return chat_id in ALLOWED_CHATS
@@ -228,7 +239,7 @@ def search_anime_by_name(anime_name):
     except:
         return "Ошибка! Попробуй другое название. 🐱"
 
-def get_random_anime(genre=None):
+def get_random_anime(genre=None, year=None):
     try:
         url = "https://shikimori.one/api/animes"
         params = {"limit": 50, "order": "random"}
@@ -259,6 +270,9 @@ def get_random_anime(genre=None):
             }
             params["genre"] = genre_map.get(genre.lower(), genre.lower())
         
+        if year:
+            params["season"] = f"{year}_year"
+        
         response = requests.get(url, params=params, timeout=10)
         if response.status_code == 200:
             data = response.json()
@@ -268,20 +282,21 @@ def get_random_anime(genre=None):
                 english_name = anime.get("name", "Неизвестно")
                 score = anime.get("score", "Нет")
                 episodes = anime.get("episodes", "Неизвестно")
-                year = anime.get("released_on", "Неизвестно")[:4] if anime.get("released_on") else "Неизвестно"
+                year_anime = anime.get("released_on", "Неизвестно")[:4] if anime.get("released_on") else "Неизвестно"
                 genres = ', '.join([g['name'] for g in anime.get('genres', [])[:3]])
                 
                 return f"""🎲 Тебе выпало:
 
 🎬 «{russian_name}» ({english_name})
-📅 {year} год
+📅 {year_anime} год
 ⭐ {score}/10
 🎭 {genres}
 📺 {episodes} эпизодов
 
 Приятного просмотра! 🐱"""
         return "Ничего не нашёл... 🐱"
-    except:
+    except Exception as e:
+        print(f"Ошибка: {e}")
         return "Ошибка! Попробуй ещё раз. 🐱"
 
 def get_top_anime(genre=None, limit=10):
@@ -429,11 +444,24 @@ def fallback_response(question, user_id, user_name, search_results=None, include
                 reply += f"• {r['title']}\n"
             return reply + "\nХочешь ссылки? Добавь +ссылка. 🐱"
 
+    if "какой сейчас год" in q or "какой год" in q or "текущий год" in q:
+        return f"Сейчас {CURRENT_YEAR} год! 🐱"
+
+    if "какая сегодня дата" in q or "сегодняшняя дата" in q or "какое сегодня число" in q:
+        return f"Сегодня {CURRENT_DAY}.{CURRENT_MONTH}.{CURRENT_YEAR} 🐱"
+
+    if "какой сегодня день" in q or "день недели" in q:
+        weekdays = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
+        weekday_num = datetime.datetime.now().weekday()
+        return f"Сегодня {weekdays[weekday_num]}! 🐱"
+
     if "список команд" in q or "команды" in q or "что ты умеешь" in q:
         return f"""📋 КОМАНДЫ КОТА, {user_name}:
 
 🎬 АНИМЕ:
 • Кот посоветуй (жанр) — боевик, романтика, комедия, фэнтези, драма, ужасы, триллер, детектив, меха, киберпанк и другие
+• Кот посоветуй (год) — например: Кот посоветуй аниме 2010
+• Кот посоветуй (жанр) (год) — например: Кот посоветуй боевик 2005
 • Кот найди аниме (название) — поиск по названию
 • Кот топ аниме — топ-10 популярных
 • Кот топ (жанр) — топ-10 по жанру
@@ -450,20 +478,26 @@ def fallback_response(question, user_id, user_name, search_results=None, include
 💬 ОБЩЕНИЕ:
 • Кот привет — поздороваться
 • Кот как дела? — спросить как дела
+• Кот какой сейчас год — узнать текущий год
+• Кот какая сегодня дата — узнать сегодняшнюю дату
 • Кот что я говорил — показать историю
 • Кот забудь всё — очистить память
 
 Просто напиши команду! 🐱"""
     
     if "посоветуй аниме" in q:
+        years = re.findall(r'\b(19|20)\d{2}\b', q)
+        year = years[0] if years else None
+        
         genres_list = ["боевик", "романтика", "комедия", "фэнтези", "драма", "ужасы", 
                        "фантастика", "триллер", "детектив", "меха", "повседневность", 
                        "психологическое", "историческое", "приключения", "мистика", 
                        "спорт", "гарем", "этти", "школа", "киберпанк", "военное"]
+        
         for genre in genres_list:
             if genre in q:
-                return get_random_anime(genre=genre)
-        return get_random_anime()
+                return get_random_anime(genre=genre, year=year)
+        return get_random_anime(year=year)
     
     elif "топ" in q and "аниме" in q:
         genres_list = ["боевик", "романтика", "комедия", "фэнтези", "драма", "ужасы", 
@@ -600,6 +634,12 @@ def handle_message(message):
             bot.reply_to(message, f"Я слушаю, {user_name}! 😸\n\nНапиши «список команд» чтобы увидеть, что я умею. 🐱")
             return
 
+        # 👇 ВАЖНО: ПРОВЕРКА НА ИГРУ В ГОРОДА 👇
+        if user_id in city_games:
+            answer = fallback_response(user_query, user_id, user_name, None, False)
+            bot.reply_to(message, answer)
+            return
+
         bot.send_chat_action(message.chat.id, "typing")
         answer = ask_mistral(user_query, user_id, user_name, None, False)
         bot.reply_to(message, answer)
@@ -612,11 +652,12 @@ if __name__ == "__main__":
     print(f"Хозяин ID: {MASTER_USER_ID}")
     print(f"Разрешённые чаты: {ALLOWED_CHATS}")
     print(f"Режим: подробный | Токены: 4000 | Температура: 0.9")
+    print(f"Текущая дата: {CURRENT_DAY}.{CURRENT_MONTH}.{CURRENT_YEAR}")
     print("\nКоманды для всех:")
-    print("- Аниме: посоветуй, найди, топ")
+    print("- Аниме: посоветуй, найди, топ (можно по году и жанру)")
     print("- Игры: сыграем в города")
     print("- Поиск: Котопоиск")
-    print("- Общение: привет, как дела, что я говорил")
+    print("- Общение: привет, как дела, дата, год")
     print("\nСкрытые команды (только для хозяина):")
     print("- настройки, макс токенов, температура, режим")
     print("- кот спать, кот проснись, мой айди")
