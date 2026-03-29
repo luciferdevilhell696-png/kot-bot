@@ -58,14 +58,6 @@ def get_last_letter(city):
         return city[-2].lower()
     return last
 
-def is_valid_city(city_name, last_letter, used_cities):
-    city_lower = city_name.lower()
-    if city_lower in used_cities:
-        return False, "Уже был такой город!"
-    if city_lower[0] != last_letter:
-        return False, f"Город должен начинаться на букву {last_letter.upper()}"
-    return True, "OK"
-
 def check_city_exists(city_name):
     try:
         url = "https://nominatim.openstreetmap.org/search"
@@ -93,15 +85,6 @@ SYSTEM_PROMPT = f"""Ты — кот-помощник по имени Кот.
 3. Будь кратким и по делу
 4. Можешь использовать эмодзи 🎬🎮🌐🔥😴😸
 5. НЕ используй звёздочки (*), решётки (#), подчёркивания (_) для украшения текста
-
-ПРАВИЛА ИГРЫ В ГОРОДА (если тебя спрашивают):
-- Игрок называет город, бот проверяет правила
-- Город должен начинаться на последнюю букву предыдущего города
-- Нельзя повторять уже названные города
-- Мягкий знак и твёрдый знак не считаются — берётся буква перед ними
-- Если игрок говорит "сдаюсь" — игра заканчивается
-
-Настоящие города проверяются через API. Не выдумывай города!
 
 ВАЖНО: Ты знаешь текущую дату. Можешь отвечать на вопросы о сегодняшней дате и текущем годе."""
 
@@ -572,6 +555,12 @@ def handle_message(message):
         print(f"❌ Заблокирован чат: {chat_id}")
         return
 
+    # 👇 САМАЯ ПЕРВАЯ ПРОВЕРКА — ИГРА В ГОРОДА 👇
+    if user_id in city_games:
+        answer = fallback_response(text, user_id, user_name, None, False)
+        bot.reply_to(message, answer)
+        return
+
     if "мой айди" in text_lower or "мой id" in text_lower:
         username = message.from_user.username if message.from_user.username else "нет"
         bot.reply_to(message, f"📌 Твой ID: {user_id}\n📌 Имя: {user_name}\n📌 Чат ID: {chat_id}\n🐱")
@@ -639,12 +628,6 @@ def handle_message(message):
     anime_keywords = ["посоветуй аниме", "найди аниме", "топ аниме", "топ боевиков", "топ романтики", "топ комедии", "топ фэнтези", "топ драмы", "топ ужасов", "топ фантастики", "топ триллеров", "топ детективов", "топ меха"]
     
     if any(keyword in text_lower for keyword in anime_keywords):
-        answer = fallback_response(text_lower, user_id, user_name, None, False)
-        bot.reply_to(message, answer)
-        return
-
-    # Проверка на игру в города
-    if user_id in city_games:
         answer = fallback_response(text_lower, user_id, user_name, None, False)
         bot.reply_to(message, answer)
         return
