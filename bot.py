@@ -224,7 +224,7 @@ def get_random_anime(genres=None, year=None):
         data = r.json()
 
         if year:
-            data = [a for a in data if a.get("released_on","").startswith(str(year))]
+            data = [a for a in data if a.get("released_on","") and a.get("released_on","").startswith(str(year))]
 
         if not data:
             return "Ничего не нашёл 😿 🐱"
@@ -333,12 +333,16 @@ def get_top_anime(genre=None, year=None, limit=10):
 
         data = response.json()
 
+        # Фильтр по году (с проверкой на None)
         if year:
-            data = [a for a in data if a.get("released_on", "").startswith(str(year))]
+            data = [a for a in data if a.get("released_on") is not None and a.get("released_on", "").startswith(str(year))]
 
+        # Сортировка по рейтингу
         data = sorted(data, key=lambda x: float(x.get("score") or 0), reverse=True)
 
         if not data:
+            if year:
+                return f"Ничего не нашёл за {year} год 😿 Попробуй другой год. 🐱"
             return "Ничего не нашёл 😿 🐱"
 
         result = f"🔥 Топ-{min(limit, len(data))}"
@@ -496,13 +500,28 @@ def handle_message(message):
     if chat_id not in ALLOWED_CHATS:
         return
 
+    # ====== 😴 РЕЖИМ СНА (сначала проверяем команды хозяина) ======
+    if user_id == MASTER_USER_ID:
+        if "кот спать" in text_lower:
+            is_sleeping = True
+            bot.reply_to(message, f"Спокойной ночи, {user_name}! 😴🐱")
+            return
+        
+        if "кот проснись" in text_lower:
+            is_sleeping = False
+            bot.reply_to(message, f"Доброе утро, {user_name}! ☀️🐱")
+            return
+
+    # Если бот спит — НЕ РЕАГИРУЕМ НИ НА ЧТО
+    if is_sleeping:
+        return
+
     # ====== 🔥 ПРОВЕРКА: реагируем ТОЛЬКО если:
     # 1. Сообщение начинается с "кот" (или "Кот")
     # 2. ИЛИ это ответ на сообщение бота ======
     starts_with_cat = text_lower.startswith("кот")
     
     if not starts_with_cat and not is_reply_to_bot:
-        # Игнорируем всё остальное
         return
 
     # Убираем "кот" из начала сообщения
@@ -516,28 +535,6 @@ def handle_message(message):
         clean_text = text.strip()
 
     logger.info(f"Сообщение от {user_name}: {clean_text[:50]}")
-
-    # ====== 😴 РЕЖИМ СНА (только для хозяина) ======
-    if user_id == MASTER_USER_ID:
-        if "кот спать" in text_lower:
-            is_sleeping = True
-            bot.reply_to(message, f"Спокойной ночи, {user_name}! 😴🐱")
-            return
-        
-        if "кот проснись" in text_lower:
-            is_sleeping = False
-            bot.reply_to(message, f"Доброе утро, {user_name}! ☀️🐱")
-            return
-
-    # Если бот спит — игнорируем (кроме команд хозяина выше)
-    if is_sleeping:
-        if random.random() < 0.2:
-            bot.reply_to(message, random.choice([
-                f"Мур... сплю, {user_name}... 😴🐱",
-                f"Ззз... 🐱",
-                f"Утром приходи... 🐱"
-            ]))
-        return
 
     # ====== ⚙️ НАСТРОЙКИ (только для хозяина) ======
     if user_id == MASTER_USER_ID:
@@ -765,4 +762,3 @@ if __name__ == "__main__":
         bot.infinity_polling(skip_pending=True, timeout=60)
     except Exception as e:
         logger.error(f"Критическая ошибка: {e}")
-                         
