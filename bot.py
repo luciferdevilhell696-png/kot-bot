@@ -752,4 +752,3 @@ if __name__ == "__main__":
             logger.error(f"Ошибка polling: {e}")
             time.sleep(15)
             print("Перезапуск...")
-        game["used_
