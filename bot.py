@@ -7,9 +7,10 @@ import random
 import datetime
 import os
 
-TELEGRAM_TOKEN = "8785895690:AAFjNx1sMzJvjPgo6G5Qe-qSz5-E4QkN1_A"
-MISTRAL_API_KEY = "I9PvXEOaGCsaAvjfMcPLSF0P5FrdmQJ9"
-SEARXNG_URL = "https://searxng-railway-production-6f14.up.railway.app/search"
+# ====== 🔐 ТОКЕНЫ ИЗ ПЕРЕМЕННЫХ ОКРУЖЕНИЯ (RAILWAY) ======
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
+SEARXNG_URL = os.getenv("SEARXNG_URL", "https://searxng-railway-production-6f14.up.railway.app/search")
 
 MASTER_USER_ID = 5939413307
 
@@ -18,6 +19,16 @@ ALLOWED_CHATS = [
     -1002815261087,
     -1002102345616,
 ]
+
+# Проверка токенов
+if not TELEGRAM_TOKEN:
+    print("❌ ОШИБКА: TELEGRAM_TOKEN не найден в переменных окружения!")
+    exit(1)
+if not MISTRAL_API_KEY:
+    print("❌ ОШИБКА: MISTRAL_API_KEY не найден в переменных окружения!")
+    exit(1)
+
+print("✅ Токены загружены из переменных окружения")
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
@@ -36,7 +47,6 @@ city_games = {}
 
 # ====== 🎮 ЗАГРУЗКА ГОРОДОВ ИЗ ФАЙЛА ======
 def load_cities_from_file(filename="городада.txt"):
-    """Загружает города из текстового файла"""
     cities_db = {}
     
     try:
@@ -54,7 +64,6 @@ def load_cities_from_file(filename="городада.txt"):
                 cities_db[first_letter].append(city)
         
         print(f"✅ Загружено городов: {sum(len(v) for v in cities_db.values())}")
-        print(f"📊 Букв в базе: {len(cities_db)}")
         return cities_db
     except FileNotFoundError:
         print(f"❌ Файл {filename} не найден!")
@@ -64,7 +73,6 @@ def load_cities_from_file(filename="городада.txt"):
         return {}
 
 def get_city_by_letter(cities_db, letter, used_cities):
-    """Возвращает случайный город на заданную букву"""
     cities = cities_db.get(letter, [])
     available = [c for c in cities if c.lower() not in used_cities]
     return random.choice(available) if available else None
@@ -76,7 +84,6 @@ def get_last_letter(city):
     return last
 
 def check_city_in_db(cities_db, city_name, used_cities):
-    """Проверяет, есть ли город в базе"""
     city_lower = city_name.lower()
     first_letter = city_name[0].lower()
     
@@ -99,7 +106,6 @@ def start_city_game(user_id):
     if not CITIES_DB:
         return "❌ База городов не загружена! Проверь файл городада.txt 🐱"
     
-    # Берем город на букву "м" или любой первый попавшийся
     start_cities = CITIES_DB.get("м", [])
     if not start_cities:
         for letter, cities in CITIES_DB.items():
@@ -114,24 +120,12 @@ def start_city_game(user_id):
     last_letter = get_last_letter(start_city)
     
     city_games[user_id] = {
-        "current_city": start_city,
         "last_letter": last_letter,
         "used_cities": [start_city.lower()],
         "user_cities_count": 0
     }
     
     return f"🎮 Играем в города! Я называю {start_city}. Тебе на букву {last_letter.upper()}. Твой ход! 🐱"
-
-def bot_make_move_city(user_id):
-    """Бот делает ход в игре в города"""
-    game = city_games[user_id]
-    bot_city = get_city_by_letter(CITIES_DB, game["last_letter"], game["used_cities"])
-    
-    if bot_city:
-        game["used_cities"].append(bot_city.lower())
-        game["last_letter"] = get_last_letter(bot_city)
-        return bot_city
-    return None
 
 def get_current_date():
     now = datetime.datetime.now()
@@ -461,40 +455,6 @@ def fallback_response(question, user_id, user_name, search_results=None, include
     q = question.lower()
     add_to_memory(user_id, "user", question[:200])
 
-    # ====== ИГРА В ГОРОДА (с базой из файла) ======
-    if "сыграем в города" in q or "игра города" in q or "города игра" in q:
-        return start_city_game(user_id)
-
-    if user_id in city_games:
-        if "сдаюсь" in q or "выйти" in q or "закончить" in q:
-            game = city_games.pop(user_id)
-            user_cities = game.get("user_cities_count", 0)
-            return f"🏆 Игра окончена! Ты назвал {user_cities} городов. Хорошая игра! 🐱"
-        
-        city_name = q.strip()
-        if not city_name:
-            game = city_games[user_id]
-            return f"Напиши город на букву {game['last_letter'].upper()}! 🐱"
-        
-        game = city_games[user_id]
-        
-        # Проверка через базу городов
-        exists, msg = check_city_in_db(CITIES_DB, city_name, game["used_cities"])
-        if not exists:
-            return msg
-        
-        # Проверка первой буквы
-        if city_name[0].lower() != game["last_letter"]:
-            return f"Город должен начинаться на букву {game['last_letter'].upper()}! 🐱"
-        
-        # Принимаем город
-        game["used_cities"].append(city_name.lower())
-        game["user_cities_count"] = game.get("user_cities_count", 0) + 1
-        next_letter = get_last_letter(city_name)
-        game["last_letter"] = next_letter
-        
-        return f"✅ Принято! {city_name}. Тебе на букву {next_letter.upper()}. 🐱"
-
     if search_results:
         if include_links:
             reply = "🔍 Вот что нашёл:\n\n"
@@ -522,33 +482,35 @@ def fallback_response(question, user_id, user_name, search_results=None, include
         return f"""📋 КОМАНДЫ КОТА, {user_name}:
 
 🎬 АНИМЕ:
-• Кот посоветуй (жанр) — боевик, романтика, комедия, фэнтези, драма, ужасы, триллер, детектив, меха, киберпанк и другие
-• Кот найди аниме (название) — поиск по названию
-• Кот топ аниме — топ-10 популярных
-• Кот топ (жанр) — топ-10 по жанру
+• посоветуй аниме (жанр) — боевик, романтика, комедия, фэнтези, драма, ужасы, триллер, детектив, меха, киберпанк
+• найди аниме (название)
+• топ аниме
 
 🎮 ИГРЫ:
-• Кот сыграем в города — начать игру
-• (название города) — ход в игре
-• сдаюсь — закончить игру
+• сыграем в города
+• сдаюсь
 
 🌐 ПОИСК:
-• Котопоиск (запрос) — поиск без ссылок
-• Котопоиск +ссылка (запрос) — поиск со ссылками
+• котопоиск (запрос)
+• котопоиск +ссылка (запрос)
 
 💬 ОБЩЕНИЕ:
-• Кот привет — поздороваться
-• Кот как дела? — спросить как дела
-• Кот что я говорил — показать историю
-• Кот забудь всё — очистить память
+• привет, как дела, спасибо, пока
+• какой сейчас год, какая сегодня дата
+• забудь всё
 
 Просто напиши команду! 🐱"""
     
     if "посоветуй аниме" in q:
         genres_list = ["боевик", "романтика", "комедия", "фэнтези", "драма", "ужасы", 
-                       "фантастика", "триллер", "детектив", "меха", "повседневность", 
-                       "психологическое", "историческое", "приключения", "мистика", 
-                       "спорт", "гарем", "этти", "школа", "киберпанк", "военное"]
+                       "фантастика", "триллер", "детектив", "меха", "киберпанк"]
+        for genre in genres_list:
+            if genre in q:
+                return get_random_anime(genre=genre)
+        return get_random_anime()
+    
+    elif "топ" in q and "аниме" in q:
+        genres_list = ["боевик", "романтика", "комедия", "фэнтези", "драма", "ужасы"]
         for genre in genres_list:
             if genre in q:
                 return get_top_anime(genre=genre)
@@ -606,7 +568,7 @@ def handle_message(message):
         print(f"❌ Заблокирован чат: {chat_id}")
         return
 
-    # ====== 🎮 ИГРА В ГОРОДА (ПЕРВООЧЕРЕДНАЯ ПРОВЕРКА) ======
+    # ====== 🎮 ИГРА В ГОРОДА ======
     if user_id in city_games:
         if text_lower in ["сдаюсь", "выйти", "закончить"]:
             game = city_games.pop(user_id)
@@ -621,13 +583,11 @@ def handle_message(message):
         
         game = city_games[user_id]
         
-        # Проверка через базу городов
         exists, msg = check_city_in_db(CITIES_DB, text, game["used_cities"])
         if not exists:
             bot.reply_to(message, msg)
             return
         
-        # Проверка первой буквы
         if text[0].lower() != game["last_letter"]:
             bot.reply_to(message, f"Город должен начинаться на букву {game['last_letter'].upper()}! 🐱")
             return
@@ -636,13 +596,26 @@ def handle_message(message):
         game["used_cities"].append(text.lower())
         game["user_cities_count"] = game.get("user_cities_count", 0) + 1
         next_letter = get_last_letter(text)
-        game["last_letter"] = next_letter
         
-        bot.reply_to(message, f"✅ Принято! {text}. Тебе на букву {next_letter.upper()}. 🐱")
+        # Ход бота
+        bot_city = get_city_by_letter(CITIES_DB, next_letter, game["used_cities"])
+        
+        if bot_city:
+            game["used_cities"].append(bot_city.lower())
+            game["last_letter"] = get_last_letter(bot_city)
+            reply = f"✅ Принято! {text}\n\n🤖 Мой ход: {bot_city}\n🎯 Тебе на букву {game['last_letter'].upper()}! 🐱"
+        else:
+            city_games.pop(user_id)
+            reply = f"✅ Принято! {text}\n\n🏆 Я не могу найти город на букву {next_letter.upper()}! Ты победил!\n📊 Ты назвал {game['user_cities_count']} городов. 🐱"
+        
+        bot.reply_to(message, reply)
+        return
+
+    if "сыграем в города" in text_lower or "игра города" in text_lower or "поиграем в города" in text_lower:
+        bot.reply_to(message, start_city_game(user_id))
         return
 
     if "мой айди" in text_lower or "мой id" in text_lower:
-        username = message.from_user.username if message.from_user.username else "нет"
         bot.reply_to(message, f"📌 Твой ID: {user_id}\n📌 Имя: {user_name}\n📌 Чат ID: {chat_id}\n🐱")
         return
 
@@ -685,7 +658,7 @@ def handle_message(message):
         user_query = re.sub(r'котопоиск|\+ссылка', '', text_lower).strip()
 
         if not user_query:
-            bot.reply_to(message, f"Напиши что искать, {user_name}! Например: Котопоиск новости 🐱")
+            bot.reply_to(message, f"Напиши что искать, {user_name}! 🐱")
             return
 
         bot.send_chat_action(message.chat.id, "typing")
@@ -713,18 +686,12 @@ def handle_message(message):
         bot.reply_to(message, answer)
         return
 
-    # ====== 🎮 ИГРА В ГОРОДА (КОМАНДА СТАРТ) ======
-    if "сыграем в города" in text_lower or "игра города" in text_lower or "поиграем в города" in text_lower:
-        answer = start_city_game(user_id)
-        bot.reply_to(message, answer)
-        return
-
     # ====== 💬 ОБЫЧНЫЕ КОМАНДЫ ======
-    simple_commands = ["список команд", "команды", "что ты умеешь", "мой айди", "мой id", 
-                       "привет", "здарова", "как дела", "как ты", "спасибо", "пока", 
-                       "до свидания", "кто ты", "какой сейчас год", "какая сегодня дата",
-                       "какое сегодня число", "какой сегодня день", "забудь всё", "очисти память",
-                       "что я говорил", "что я спрашивал"]
+    simple_commands = ["список команд", "команды", "что ты умеешь", "привет", "здарова", 
+                       "как дела", "как ты", "спасибо", "пока", "до свидания", "кто ты", 
+                       "какой сейчас год", "какая сегодня дата", "какое сегодня число", 
+                       "какой сегодня день", "забудь всё", "очисти память", "что я говорил", 
+                       "что я спрашивал"]
     
     if any(cmd in text_lower for cmd in simple_commands):
         answer = fallback_response(text_lower, user_id, user_name, None, False)
@@ -751,7 +718,6 @@ if __name__ == "__main__":
     print("=" * 50)
     print("🐱 КОТ-БОТ ЗАПУЩЕН!")
     print("=" * 50)
-    print(f"Бот: @{bot.get_me().username}")
     print(f"Хозяин ID: {MASTER_USER_ID}")
     print(f"Разрешённые чаты: {ALLOWED_CHATS}")
     print(f"Режим: {bot_settings['mode']} | Токены: {bot_settings['max_tokens']} | Температура: {bot_settings['temperature']}")
