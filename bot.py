@@ -10,7 +10,7 @@ import os
 # ====== 🔐 ТОКЕНЫ ИЗ ПЕРЕМЕННЫХ ОКРУЖЕНИЯ (RAILWAY) ======
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
-SEARXNG_URL = os.getenv("SEARXNG_URL", "https://searxng-railway-production-6f14.up.railway.app/search")
+SEARXNG_URL = "https://searxng-railway-production-6f14.up.railway.app/search"
 
 MASTER_USER_ID = 5939413307
 
@@ -255,6 +255,7 @@ def search_web(query):
         print(f"Ошибка поиска: {e}")
         return None
 
+# ====== 🎬 АНИМЕ (ИСПРАВЛЕННЫЙ ПОИСК ПО ЖАНРАМ) ======
 def search_anime_by_name(anime_name):
     try:
         url = "https://shikimori.one/api/animes"
@@ -289,60 +290,77 @@ def search_anime_by_name(anime_name):
         print(f"Ошибка поиска аниме: {e}")
         return "Ошибка! Попробуй другое название. 🐱"
 
-def get_random_anime(genre=None):
+def get_random_anime(genre=None, year=None):
     try:
         url = "https://shikimori.one/api/animes"
-        params = {"limit": 50, "order": "random"}
         headers = {"User-Agent": "KotBot/1.0"}
         
-        if genre:
-            genre_map = {
-                "боевик": "action", "экшн": "action",
-                "романтика": "romance",
-                "комедия": "comedy",
-                "фэнтези": "fantasy", "фентези": "fantasy",
-                "драма": "drama",
-                "ужасы": "horror", "хоррор": "horror",
-                "фантастика": "sci-fi",
-                "триллер": "thriller",
-                "детектив": "detective",
-                "меха": "mecha",
-                "повседневность": "slice of life",
-                "психологическое": "psychological",
-                "историческое": "historical",
-                "приключения": "adventure",
-                "мистика": "mystery",
-                "спорт": "sports",
-                "гарем": "harem",
-                "этти": "ecchi",
-                "школа": "school",
-                "киберпанк": "cyberpunk",
-                "военное": "military"
-            }
-            params["genre"] = genre_map.get(genre.lower(), genre.lower())
+        # Получаем 200 случайных аниме
+        params = {"limit": 200, "order": "random"}
         
-        response = requests.get(url, params=params, headers=headers, timeout=10)
+        response = requests.get(url, params=params, headers=headers, timeout=15)
+        
         if response.status_code == 200:
             data = response.json()
-            if data:
-                anime = random.choice(data)
-                russian_name = anime.get("russian", anime.get("name", "Неизвестно"))
-                english_name = anime.get("name", "Неизвестно")
-                score = anime.get("score", "Нет")
-                episodes = anime.get("episodes", "Неизвестно")
-                year = anime.get("released_on", "Неизвестно")[:4] if anime.get("released_on") else "Неизвестно"
-                genres = ', '.join([g['name'] for g in anime.get('genres', [])[:3]])
-                
-                return f"""🎲 Тебе выпало:
+            filtered = data
+            
+            # Фильтруем по жанру (на стороне бота)
+            if genre:
+                genre_map = {
+                    "боевик": "Action", "экшн": "Action",
+                    "романтика": "Romance",
+                    "комедия": "Comedy",
+                    "фэнтези": "Fantasy", "фентези": "Fantasy",
+                    "драма": "Drama",
+                    "ужасы": "Horror", "хоррор": "Horror",
+                    "фантастика": "Sci-Fi",
+                    "триллер": "Thriller",
+                    "детектив": "Detective",
+                    "меха": "Mecha",
+                    "повседневность": "Slice of Life",
+                    "психологическое": "Psychological",
+                    "историческое": "Historical",
+                    "приключения": "Adventure",
+                    "мистика": "Mystery",
+                    "спорт": "Sports",
+                    "гарем": "Harem",
+                    "этти": "Ecchi",
+                    "школа": "School",
+                    "киберпанк": "Cyberpunk",
+                    "военное": "Military"
+                }
+                genre_en = genre_map.get(genre.lower(), genre.capitalize())
+                filtered = [a for a in data if any(genre_en.lower() == g['name'].lower() for g in a.get('genres', []))]
+                print(f"🎭 Жанр {genre} -> {genre_en}, найдено: {len(filtered)}")
+            
+            # Фильтруем по году
+            if year and filtered:
+                filtered = [a for a in filtered if a.get('released_on', '').startswith(str(year))]
+                print(f"📅 Год {year}, найдено: {len(filtered)}")
+            
+            if not filtered:
+                if genre:
+                    return f"Не нашёл аниме в жанре {genre}. Попробуй другой жанр. 🐱"
+                return "Ничего не нашёл... Попробуй позже. 🐱"
+            
+            anime = random.choice(filtered)
+            russian_name = anime.get("russian", anime.get("name", "Неизвестно"))
+            score = anime.get("score", "Нет")
+            episodes = anime.get("episodes", "Неизвестно")
+            year_anime = anime.get("released_on", "Неизвестно")[:4] if anime.get("released_on") else "Неизвестно"
+            genres = ', '.join([g['name'] for g in anime.get('genres', [])[:3]])
+            
+            return f"""🎲 Тебе выпало:
 
-🎬 «{russian_name}» ({english_name})
-📅 {year} год
+🎬 {russian_name}
 ⭐ {score}/10
 🎭 {genres}
 📺 {episodes} эпизодов
+📅 {year_anime} год
 
 Приятного просмотра! 🐱"""
-        return "Ничего не нашёл... 🐱"
+        
+        return "Ошибка API. Попробуй позже. 🐱"
     except Exception as e:
         print(f"Ошибка: {e}")
         return "Ошибка! Попробуй ещё раз. 🐱"
@@ -350,50 +368,43 @@ def get_random_anime(genre=None):
 def get_top_anime(genre=None, limit=10):
     try:
         url = "https://shikimori.one/api/animes"
-        params = {"limit": limit, "order": "popularity", "status": "released"}
         headers = {"User-Agent": "KotBot/1.0"}
         
-        if genre:
-            genre_map = {
-                "боевик": "action", "экшн": "action",
-                "романтика": "romance",
-                "комедия": "comedy",
-                "фэнтези": "fantasy",
-                "драма": "drama",
-                "ужасы": "horror",
-                "фантастика": "sci-fi",
-                "триллер": "thriller",
-                "детектив": "detective",
-                "меха": "mecha",
-                "повседневность": "slice of life",
-                "психологическое": "psychological",
-                "историческое": "historical",
-                "приключения": "adventure",
-                "мистика": "mystery",
-                "спорт": "sports",
-                "гарем": "harem",
-                "этти": "ecchi",
-                "школа": "school",
-                "киберпанк": "cyberpunk",
-                "военное": "military"
-            }
-            params["genre"] = genre_map.get(genre.lower(), genre.lower())
+        params = {"limit": 50, "order": "popularity", "status": "released"}
         
-        response = requests.get(url, params=params, headers=headers, timeout=10)
+        response = requests.get(url, params=params, headers=headers, timeout=15)
+        
         if response.status_code == 200:
             data = response.json()
-            if data:
-                result = f"🔥 Топ-{limit} аниме"
-                if genre:
-                    result += f" в жанре {genre}:\n\n"
-                else:
-                    result += ":\n\n"
-                
-                for i, anime in enumerate(data[:limit], 1):
-                    name = anime.get("russian", anime.get("name", "Неизвестно"))
-                    score = anime.get("score", "?")
-                    result += f"{i}. «{name}» — {score}/10 ⭐\n"
-                return result + "\n🐱"
+            
+            # Фильтруем по жанру на стороне бота
+            if genre:
+                genre_map = {
+                    "боевик": "Action", "экшн": "Action",
+                    "романтика": "Romance",
+                    "комедия": "Comedy",
+                    "фэнтези": "Fantasy",
+                    "драма": "Drama",
+                    "ужасы": "Horror"
+                }
+                genre_en = genre_map.get(genre.lower(), genre.capitalize())
+                data = [a for a in data if any(genre_en.lower() == g['name'].lower() for g in a.get('genres', []))]
+            
+            if not data:
+                return f"Не нашёл топ аниме в жанре {genre}. Попробуй другой жанр. 🐱"
+            
+            result = f"🔥 Топ-{min(limit, len(data))} аниме"
+            if genre:
+                result += f" в жанре {genre}:\n\n"
+            else:
+                result += ":\n\n"
+            
+            for i, anime in enumerate(data[:limit], 1):
+                name = anime.get("russian", anime.get("name", "Неизвестно"))
+                score = anime.get("score", "?")
+                result += f"{i}. «{name}» — {score}/10 ⭐\n"
+            return result + "\n🐱"
+        
         return "Не могу получить топ. Попробуй позже. 🐱"
     except Exception as e:
         print(f"Ошибка: {e}")
@@ -501,57 +512,7 @@ def fallback_response(question, user_id, user_name, search_results=None, include
 
 Просто напиши команду! 🐱"""
     
-    if "посоветуй аниме" in q:
-        genres_list = ["боевик", "романтика", "комедия", "фэнтези", "драма", "ужасы", 
-                       "фантастика", "триллер", "детектив", "меха", "киберпанк"]
-        for genre in genres_list:
-            if genre in q:
-                return get_random_anime(genre=genre)
-        return get_random_anime()
-    
-    elif "топ" in q and "аниме" in q:
-        genres_list = ["боевик", "романтика", "комедия", "фэнтези", "драма", "ужасы"]
-        for genre in genres_list:
-            if genre in q:
-                return get_top_anime(genre=genre)
-        return get_top_anime()
-    
-    elif "найди аниме" in q:
-        anime_name = re.sub(r'найди аниме|найти аниме', '', q).strip()
-        if anime_name:
-            return search_anime_by_name(anime_name)
-        return "Напиши название аниме после команды. 🐱"
-    
-    elif "забудь" in q or "очисти память" in q:
-        return clear_memory(user_id)
-    
-    elif "что я говорил" in q or "что я спрашивал" in q:
-        history = get_user_memory(user_id)
-        if not history:
-            return "Мы ещё не разговаривали! Напиши что-нибудь. 🐱"
-        result = "📝 Недавно ты спрашивал:\n"
-        for msg in history[-5:]:
-            if msg["role"] == "user":
-                result += f"• {msg['content'][:80]}...\n"
-        return result + "🐱"
-    
-    elif "привет" in q or "здарова" in q:
-        return f"Привет, {user_name}! Как настроение? 🐱"
-    
-    elif "как дела" in q or "как ты" in q:
-        return f"Мурлычу отлично, {user_name}! Греюсь на солнышке ☀️ А у тебя? 🐱"
-    
-    elif "кто ты" in q:
-        return f"Я Кот! Твой пушистый друг, {user_name}. Напиши «список команд» чтобы узнать, что я умею. 🐱"
-    
-    elif "спасибо" in q:
-        return f"Пожалуйста, {user_name}! 🐱"
-    
-    elif "пока" in q or "до свидания" in q:
-        return f"Пока, {user_name}! Заходи ещё. 🐱👋"
-    
-    else:
-        return f"Не совсем понял, {user_name}. Напиши «список команд» чтобы увидеть, что я умею. 🐱"
+    return f"Не совсем понял, {user_name}. Напиши «список команд» чтобы увидеть, что я умею. 🐱"
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
@@ -678,12 +639,42 @@ def handle_message(message):
         bot.reply_to(message, answer)
         return
 
-    # ====== 🎬 АНИМЕ ======
-    anime_keywords = ["посоветуй аниме", "найди аниме", "топ аниме", "топ боевиков", "топ романтики", "топ комедии", "топ фэнтези", "топ драмы", "топ ужасов", "топ фантастики", "топ триллеров", "топ детективов", "топ меха"]
-    
-    if any(keyword in text_lower for keyword in anime_keywords):
-        answer = fallback_response(text_lower, user_id, user_name, None, False)
-        bot.reply_to(message, answer)
+    # ====== 🎬 АНИМЕ (ПРЯМОЙ ВЫЗОВ) ======
+    if "посоветуй аниме" in text_lower:
+        # Проверяем жанр
+        genres_list = ["боевик", "романтика", "комедия", "фэнтези", "драма", "ужасы", 
+                       "фантастика", "триллер", "детектив", "меха", "киберпанк"]
+        
+        found_genre = None
+        for genre in genres_list:
+            if genre in text_lower:
+                found_genre = genre
+                break
+        
+        # Проверяем год
+        year_match = re.search(r'\b(19|20)\d{2}\b', text_lower)
+        year = year_match.group(0) if year_match else None
+        
+        bot.reply_to(message, get_random_anime(genre=found_genre, year=year))
+        return
+
+    if "найди аниме" in text_lower:
+        anime_name = re.sub(r'(?i)найди аниме|найти аниме', '', text).strip()
+        if not anime_name:
+            bot.reply_to(message, "Напиши название аниме после команды 🐱")
+            return
+        bot.reply_to(message, search_anime_by_name(anime_name))
+        return
+
+    if "топ аниме" in text_lower:
+        genres_list = ["боевик", "романтика", "комедия", "фэнтези", "драма", "ужасы"]
+        found_genre = None
+        for genre in genres_list:
+            if genre in text_lower:
+                found_genre = genre
+                break
+        
+        bot.reply_to(message, get_top_anime(genre=found_genre))
         return
 
     # ====== 💬 ОБЫЧНЫЕ КОМАНДЫ ======
@@ -724,6 +715,15 @@ if __name__ == "__main__":
     print(f"Текущая дата: {CURRENT_DAY}.{CURRENT_MONTH}.{CURRENT_YEAR}")
     print(f"База городов: {sum(len(v) for v in CITIES_DB.values()) if CITIES_DB else 0} городов")
     print("=" * 50)
+
+    # Удаляем вебхук чтобы избежать ошибки 409
+    try:
+        bot.remove_webhook()
+        print("✅ Вебхук удалён")
+    except:
+        pass
+    
+    time.sleep(1)
 
     while True:
         try:
