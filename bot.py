@@ -8,8 +8,6 @@ import datetime
 import os
 import json
 import logging
-import signal
-import sys
 
 # ====== 📊 ЛОГИРОВАНИЕ ======
 logging.basicConfig(
@@ -722,29 +720,16 @@ def handle_message(message):
 
 # ====== 🚀 ЗАПУСК ======
 if __name__ == "__main__":
-    # Обработчики сигналов для корректного завершения
-    def signal_handler(signum, frame):
-        print("Получен сигнал завершения...")
-        sys.exit(0)
-    
-    signal.signal(signal.SIGTERM, signal_handler)
-    signal.signal(signal.SIGINT, signal_handler)
-    
     print("=" * 50)
     print("🐱 КОТ-БОТ PRO ЗАПУЩЕН!")
     print("=" * 50)
     
-    # МНОГОКРАТНОЕ УДАЛЕНИЕ ВЕБХУКА (фикс ошибки 409)
-    for i in range(5):
-        try:
-            bot.remove_webhook()
-            print(f"✅ Вебхук удалён (попытка {i+1})")
-            time.sleep(2)
-        except Exception as e:
-            print(f"⚠️ Попытка {i+1} не удалась: {e}")
-    
-    # Дополнительная задержка
-    time.sleep(3)
+    # Удаляем вебхук
+    try:
+        bot.remove_webhook()
+        print("✅ Вебхук удалён")
+    except Exception as e:
+        print(f"⚠️ Ошибка удаления вебхука: {e}")
     
     print(f"Хозяин ID: {MASTER_USER_ID}")
     print(f"Разрешённые чаты: {ALLOWED_CHATS}")
@@ -753,11 +738,8 @@ if __name__ == "__main__":
     print(f"Режим: {bot_settings['mode']} | Токены: {bot_settings['max_tokens']} | Температура: {bot_settings['temperature']}")
     print("=" * 50)
 
-    # ЗАПУСК С МЕНЬШИМ ТАЙМАУТОМ
-    while True:
-        try:
-            bot.infinity_polling(timeout=30, long_polling_timeout=30)
-        except Exception as e:
-            logger.error(f"Ошибка polling: {e}")
-            time.sleep(10)
-            print("Перезапуск...")
+    # ОДИНОЧНЫЙ ЗАПУСК (без threading и двойных циклов)
+    try:
+        bot.infinity_polling(skip_pending=True, timeout=60)
+    except Exception as e:
+        logger.error(f"Критическая ошибка: {e}")
