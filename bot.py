@@ -8,8 +8,18 @@ import datetime
 import os
 import json
 import logging
+import signal
+import sys
 
-# ====== 📊 ЛОГИРОВАНИЕ ======
+# ====== ОБРАБОТКА ЗАВЕРШЕНИЯ ======
+def signal_handler(signum, frame):
+    print("Завершение работы...")
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
+
+# ====== ЛОГИРОВАНИЕ ======
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
@@ -30,15 +40,15 @@ if not TELEGRAM_TOKEN or not MISTRAL_API_KEY:
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-# ====== 📦 ПАМЯТЬ ======
+# ====== ПАМЯТЬ ======
 user_memory = defaultdict(list)
 user_preferences = defaultdict(list)
 MAX_MEMORY = 20
 is_sleeping = False
 
-# ====== 💾 КЭШ АНИМЕ ======
+# ====== КЭШ ======
 CACHE_FILE = "anime_cache.json"
-CACHE_EXPIRATION = 86400  # 24 часа
+CACHE_EXPIRATION = 86400
 
 def load_cache():
     if os.path.exists(CACHE_FILE):
@@ -58,29 +68,12 @@ def save_cache():
 
 anime_cache = load_cache()
 
-# ====== ⚙️ НАСТРОЙКИ БОТА ======
+# ====== НАСТРОЙКИ ======
 bot_settings = {
     "max_tokens": 2000,
     "temperature": 0.7,
     "mode": "normal"
 }
-
-def get_settings_text():
-    return f"""⚙️ **ТЕКУЩИЕ НАСТРОЙКИ:**
-
-🎛️ Максимум токенов: {bot_settings['max_tokens']}
-🌡️ Температура: {bot_settings['temperature']}
-📝 Режим: {bot_settings['mode']}
-
-🔧 **Команды для хозяина:**
-• настройки — показать настройки
-• макс токенов [число] — от 100 до 8000
-• температура [число] — от 0.1 до 1.5
-• режим краткий — короткие ответы
-• режим подробный — длинные ответы
-• режим нормальный — сбросить
-
-🐱"""
 
 # ====== 🎮 ИГРА В ГОРОДА ======
 city_games = {}
@@ -202,7 +195,6 @@ def get_random_anime(genres=None, year=None):
         if cache_key in anime_cache:
             cache_time = anime_cache[cache_key].get("timestamp", 0)
             if time.time() - cache_time < CACHE_EXPIRATION:
-                logger.info(f"Возврат из кэша: {cache_key}")
                 return anime_cache[cache_key]["result"]
 
         url = "https://shikimori.one/api/animes"
@@ -220,7 +212,6 @@ def get_random_anime(genres=None, year=None):
 
         r = requests.get(url, params=params, headers=headers, timeout=15)
         if r.status_code != 200:
-            logger.error(f"Ошибка API: {r.status_code}")
             return "Ошибка API 🐱"
 
         data = r.json()
@@ -264,7 +255,6 @@ def search_anime_by_name(anime_name):
         if anime_name in anime_cache:
             cache_time = anime_cache[anime_name].get("timestamp", 0)
             if time.time() - cache_time < CACHE_EXPIRATION:
-                logger.info(f"Возврат из кэша: {anime_name}")
                 return anime_cache[anime_name]["result"]
 
         url = "https://shikimori.one/api/animes"
@@ -315,7 +305,6 @@ def get_top_anime(genre=None, year=None, limit=10):
         if cache_key in anime_cache:
             cache_time = anime_cache[cache_key].get("timestamp", 0)
             if time.time() - cache_time < CACHE_EXPIRATION:
-                logger.info(f"Возврат из кэша: {cache_key}")
                 return anime_cache[cache_key]["result"]
 
         url = "https://shikimori.one/api/animes"
@@ -501,83 +490,22 @@ def handle_message(message):
     if chat_id not in ALLOWED_CHATS:
         return
 
-    logger.info(f"Сообщение от {user_name}: {text[:50]}")
-
-    # ====== 🔥 ПРОВЕРКА: реагируем только если:
-    # 1. Сообщение начинается с "кот" (или "Кот")
-    # 2. ИЛИ это ответ на сообщение бота ======
+    # Реагируем только на "кот" в начале или ответ боту
     starts_with_cat = text_lower.startswith("кот")
-    
     if not starts_with_cat and not is_reply_to_bot:
-        # Игнорируем сообщения, которые не начинаются с "кот" и не являются ответом боту
         return
 
-    # Убираем "кот" из начала сообщения, если оно там есть
+    # Убираем "кот" из начала
     clean_text = text
     if starts_with_cat:
-        # Удаляем "кот" из начала (с возможными пробелами и запятыми)
         clean_text = re.sub(r'^[Кк]от[,\s]*', '', text).strip()
         if not clean_text:
-            # Если после "кот" ничего нет — показываем список команд
             bot.reply_to(message, f"Я слушаю, {user_name}! 😸\nНапиши «список команд» 🐱")
             return
     else:
         clean_text = text.strip()
 
-    # ====== ⚙️ НАСТРОЙКИ (только для хозяина) ======
-    if user_id == MASTER_USER_ID:
-        if "настройки" in text_lower and "показать" not in text_lower:
-            bot.reply_to(message, get_settings_text())
-            return
-        
-        if "макс токенов" in text_lower:
-            numbers = re.findall(r'\d+', text_lower)
-            if numbers:
-                new_val = int(numbers[0])
-                if 100 <= new_val <= 8000:
-                    bot_settings["max_tokens"] = new_val
-                    bot.reply_to(message, f"✅ Максимум токенов установлен на {new_val}. 🐱")
-                else:
-                    bot.reply_to(message, f"❌ Значение от 100 до 8000. Сейчас: {bot_settings['max_tokens']} 🐱")
-            else:
-                bot.reply_to(message, f"📝 Пример: макс токенов 3000. Сейчас: {bot_settings['max_tokens']} 🐱")
-            return
-        
-        if "температура" in text_lower:
-            numbers = re.findall(r'\d+\.?\d*', text_lower)
-            if numbers:
-                new_val = float(numbers[0])
-                if 0.1 <= new_val <= 1.5:
-                    bot_settings["temperature"] = new_val
-                    bot.reply_to(message, f"✅ Температура установлена на {new_val}. 🐱")
-                else:
-                    bot.reply_to(message, f"❌ Значение от 0.1 до 1.5. Сейчас: {bot_settings['temperature']} 🐱")
-            else:
-                bot.reply_to(message, f"📝 Пример: температура 0.9. Сейчас: {bot_settings['temperature']} 🐱")
-            return
-        
-        if "режим краткий" in text_lower:
-            bot_settings["mode"] = "short"
-            bot_settings["max_tokens"] = 500
-            bot_settings["temperature"] = 0.5
-            bot.reply_to(message, "✅ Включён краткий режим. Ответы короткие. 🐱")
-            return
-        
-        if "режим подробный" in text_lower:
-            bot_settings["mode"] = "long"
-            bot_settings["max_tokens"] = 4000
-            bot_settings["temperature"] = 0.9
-            bot.reply_to(message, "✅ Включён подробный режим. Ответы длинные. 🐱")
-            return
-        
-        if "режим нормальный" in text_lower:
-            bot_settings["mode"] = "normal"
-            bot_settings["max_tokens"] = 2000
-            bot_settings["temperature"] = 0.7
-            bot.reply_to(message, "✅ Включён обычный режим. 🐱")
-            return
-
-    # ====== 🎮 ИГРА В ГОРОДА ======
+    # ИГРА В ГОРОДА
     if user_id in city_games:
         if text_lower in ["сдаюсь", "выйти", "закончить"]:
             game = city_games.pop(user_id)
@@ -613,7 +541,7 @@ def handle_message(message):
         bot.reply_to(message, start_city_game(user_id))
         return
 
-    # ====== 🎬 АНИМЕ ======
+    # АНИМЕ
     if "посоветуй аниме" in text_lower:
         genres, year = parse_anime_request(text_lower)
         save_preferences(user_id, genres)
@@ -652,14 +580,13 @@ def handle_message(message):
         bot.reply_to(message, get_top_anime(genre=found_genre, year=year))
         return
 
-    # ====== 🌐 КОТОПОИСК ======
+    # КОТОПОИСК
     if "котопоиск" in text_lower:
         include_links = "+ссылка" in text_lower
         query = re.sub(r'котопоиск|\+ссылка', '', text_lower).strip()
         if not query:
             bot.reply_to(message, "Напиши что искать 🐱")
             return
-        bot.send_chat_action(chat_id, "typing")
         results = search_web(query)
         if not results:
             bot.reply_to(message, "Ничего не нашёл 😿🐱")
@@ -677,7 +604,74 @@ def handle_message(message):
         bot.reply_to(message, reply)
         return
 
-    # ====== 💬 ОБЩЕНИЕ ======
+    # ОБЩЕНИЕ
+    if "список команд" in text_lower or "команды" in text_lower:
+        reply = f"""📋 **КОМАНДЫ КОТА, {user_name}!**
+
+# АНИМЕ
+    if "посоветуй аниме" in text_lower:
+        genres, year = parse_anime_request(text_lower)
+        save_preferences(user_id, genres)
+        bot.reply_to(message, get_random_anime(genres, year))
+        return
+
+    if "порекомендуй что-нибудь" in text_lower or "что посмотреть" in text_lower:
+        bot.reply_to(message, recommend_from_history(user_id))
+        return
+
+    if "мой вкус" in text_lower:
+        prefs = user_preferences[user_id]
+        if prefs:
+            bot.reply_to(message, f"Твои любимые жанры: {', '.join(prefs)} 🐱")
+        else:
+            bot.reply_to(message, "Я ещё не понял твой вкус. Попроси посоветовать аниме с жанрами! 🐱")
+        return
+
+    if "найди аниме" in text_lower:
+        anime_name = re.sub(r'(?i)найди аниме|найти аниме', '', clean_text).strip()
+        if not anime_name:
+            bot.reply_to(message, "Напиши название аниме после команды 🐱")
+            return
+        bot.reply_to(message, search_anime_by_name(anime_name))
+        return
+
+    if "топ аниме" in text_lower:
+        genres_list = ["боевик", "романтика", "комедия", "фэнтези", "драма", "ужасы"]
+        found_genre = None
+        for genre in genres_list:
+            if genre in text_lower:
+                found_genre = genre
+                break
+        year_match = re.search(r'\b(19|20)\d{2}\b', text_lower)
+        year = year_match.group(0) if year_match else None
+        bot.reply_to(message, get_top_anime(genre=found_genre, year=year))
+        return
+
+    # КОТОПОИСК
+    if "котопоиск" in text_lower:
+        include_links = "+ссылка" in text_lower
+        query = re.sub(r'котопоиск|\+ссылка', '', text_lower).strip()
+        if not query:
+            bot.reply_to(message, "Напиши что искать 🐱")
+            return
+        results = search_web(query)
+        if not results:
+            bot.reply_to(message, "Ничего не нашёл 😿🐱")
+            return
+        reply = "🔍 Нашёл:\n\n"
+        for r in results:
+            title = r.get("title", "Без названия")
+            url = r.get("url", "")
+            if include_links:
+                reply += f"📌 {title}\n{url}\n\n"
+            else:
+                reply += f"• {title}\n"
+        if not include_links:
+            reply += "\nДобавь +ссылка чтобы увидеть ссылки 🐱"
+        bot.reply_to(message, reply)
+        return
+
+    # ОБЩЕНИЕ
     if "список команд" in text_lower or "команды" in text_lower:
         reply = f"""📋 **КОМАНДЫ КОТА, {user_name}!**
 
@@ -716,14 +710,13 @@ def handle_message(message):
         bot.reply_to(message, clear_memory(user_id))
         return
 
-    # Простые команды через fallback
+    # Простые команды
     simple_response = fallback_response(text_lower, user_id, user_name)
     if simple_response:
         bot.reply_to(message, simple_response)
         return
 
-    # ====== 🤖 УМНЫЙ ОТВЕТ (MISTRAL) ======
-    bot.send_chat_action(chat_id, "typing")
+    # УМНЫЙ ОТВЕТ
     answer = ask_mistral(clean_text, user_id, user_name)
     bot.reply_to(message, answer)
 
@@ -732,23 +725,25 @@ if __name__ == "__main__":
     print("=" * 50)
     print("🐱 КОТ-БОТ PRO ЗАПУЩЕН!")
     print("=" * 50)
+    
+    # Принудительное удаление вебхука
+    for i in range(3):
+        try:
+            bot.remove_webhook()
+            print(f"✅ Вебхук удалён (попытка {i+1})")
+            time.sleep(2)
+        except Exception as e:
+            print(f"⚠️ Попытка {i+1} не удалась: {e}")
+    
     print(f"Хозяин ID: {MASTER_USER_ID}")
     print(f"Разрешённые чаты: {ALLOWED_CHATS}")
     print(f"База городов: {sum(len(v) for v in CITIES_DB.values()) if CITIES_DB else 0} городов")
-    print(f"Кэш аниме: {len(anime_cache)} записей")
-    print(f"Режим: {bot_settings['mode']} | Токены: {bot_settings['max_tokens']} | Температура: {bot_settings['temperature']}")
     print("=" * 50)
-
-    try:
-        bot.remove_webhook()
-        logger.info("Вебхук удалён")
-    except:
-        pass
 
     while True:
         try:
-            bot.infinity_polling(timeout=60)
+            bot.infinity_polling(timeout=30, long_polling_timeout=30)
         except Exception as e:
             logger.error(f"Ошибка polling: {e}")
-            time.sleep(15)
+            time.sleep(5)
             print("Перезапуск...")
