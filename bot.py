@@ -5,6 +5,7 @@ import time
 from collections import defaultdict
 import random
 import datetime
+import os
 
 TELEGRAM_TOKEN = "8785895690:AAFjNx1sMzJvjPgo6G5Qe-qSz5-E4QkN1_A"
 MISTRAL_API_KEY = "I9PvXEOaGCsaAvjfMcPLSF0P5FrdmQJ9"
@@ -33,14 +34,82 @@ bot_settings = {
 
 city_games = {}
 
-def get_current_date():
-    now = datetime.datetime.now()
-    return now.year, now.month, now.day
+# ====== 🎮 ЗАГРУЗКА ГОРОДОВ ИЗ ФАЙЛА ======
+def load_cities_from_file(filename="городада.txt"):
+    """Загружает города из текстового файла"""
+    cities_db = {}
+    
+    try:
+        with open(filename, "r", encoding="utf-8") as f:
+            for line in f:
+                city = line.strip()
+                if not city:
+                    continue
+                
+                first_letter = city[0].lower()
+                
+                if first_letter not in cities_db:
+                    cities_db[first_letter] = []
+                
+                cities_db[first_letter].append(city)
+        
+        print(f"✅ Загружено городов: {sum(len(v) for v in cities_db.values())}")
+        print(f"📊 Букв в базе: {len(cities_db)}")
+        return cities_db
+    except FileNotFoundError:
+        print(f"❌ Файл {filename} не найден!")
+        return {}
+    except Exception as e:
+        print(f"❌ Ошибка загрузки: {e}")
+        return {}
 
-CURRENT_YEAR, CURRENT_MONTH, CURRENT_DAY = get_current_date()
+def get_city_by_letter(cities_db, letter, used_cities):
+    """Возвращает случайный город на заданную букву"""
+    cities = cities_db.get(letter, [])
+    available = [c for c in cities if c.lower() not in used_cities]
+    return random.choice(available) if available else None
+
+def get_last_letter(city):
+    last = city[-1].lower()
+    if last in ['ь', 'ъ', 'ы'] and len(city) > 1:
+        return city[-2].lower()
+    return last
+
+def check_city_in_db(cities_db, city_name, used_cities):
+    """Проверяет, есть ли город в базе"""
+    city_lower = city_name.lower()
+    first_letter = city_name[0].lower()
+    
+    if first_letter not in cities_db:
+        return False, f"Нет городов на букву {first_letter.upper()} в моей базе 😿"
+    
+    for c in cities_db[first_letter]:
+        if c.lower() == city_lower:
+            if city_lower in used_cities:
+                return False, f"Город {city_name} уже был! 🐱"
+            return True, "OK"
+    
+    return False, f"Не знаю города {city_name} 😿"
+
+# Загружаем города
+print("📚 Загрузка базы городов...")
+CITIES_DB = load_cities_from_file("городада.txt")
 
 def start_city_game(user_id):
-    start_cities = ["Москва", "Казань", "Сочи", "Омск", "Уфа", "Псков", "Волгоград"]
+    if not CITIES_DB:
+        return "❌ База городов не загружена! Проверь файл городада.txt 🐱"
+    
+    # Берем город на букву "м" или любой первый попавшийся
+    start_cities = CITIES_DB.get("м", [])
+    if not start_cities:
+        for letter, cities in CITIES_DB.items():
+            if cities:
+                start_cities = cities
+                break
+    
+    if not start_cities:
+        return "❌ Нет городов в базе! 🐱"
+    
     start_city = random.choice(start_cities)
     last_letter = get_last_letter(start_city)
     
@@ -53,36 +122,22 @@ def start_city_game(user_id):
     
     return f"🎮 Играем в города! Я называю {start_city}. Тебе на букву {last_letter.upper()}. Твой ход! 🐱"
 
-def get_last_letter(city):
-    last = city[-1].lower()
-    if last in ['ь', 'ъ', 'ы'] and len(city) > 1:
-        return city[-2].lower()
-    return last
+def bot_make_move_city(user_id):
+    """Бот делает ход в игре в города"""
+    game = city_games[user_id]
+    bot_city = get_city_by_letter(CITIES_DB, game["last_letter"], game["used_cities"])
+    
+    if bot_city:
+        game["used_cities"].append(bot_city.lower())
+        game["last_letter"] = get_last_letter(bot_city)
+        return bot_city
+    return None
 
-def is_valid_city(city_name, last_letter, used_cities):
-    city_lower = city_name.lower()
-    if city_lower in used_cities:
-        return False, f"Город {city_name} уже был!"
-    if city_lower[0] != last_letter:
-        return False, f"Город должен начинаться на букву {last_letter.upper()}"
-    return True, "OK"
+def get_current_date():
+    now = datetime.datetime.now()
+    return now.year, now.month, now.day
 
-def check_city_exists(city_name):
-    try:
-        url = "https://nominatim.openstreetmap.org/search"
-        params = {
-            "q": city_name,
-            "format": "json",
-            "limit": 1,
-            "countrycodes": "ru,by,kz,ua"
-        }
-        headers = {"User-Agent": "KotBot/1.0"}
-        response = requests.get(url, params=params, headers=headers, timeout=5)
-        if response.status_code == 200 and response.json():
-            return True, "OK"
-        return False, "Не знаю такого города"
-    except:
-        return True, "OK"
+CURRENT_YEAR, CURRENT_MONTH, CURRENT_DAY = get_current_date()
 
 SYSTEM_PROMPT = f"""Ты — кот-помощник по имени Кот.
 
@@ -406,6 +461,7 @@ def fallback_response(question, user_id, user_name, search_results=None, include
     q = question.lower()
     add_to_memory(user_id, "user", question[:200])
 
+    # ====== ИГРА В ГОРОДА (с базой из файла) ======
     if "сыграем в города" in q or "игра города" in q or "города игра" in q:
         return start_city_game(user_id)
 
@@ -416,21 +472,25 @@ def fallback_response(question, user_id, user_name, search_results=None, include
             return f"🏆 Игра окончена! Ты назвал {user_cities} городов. Хорошая игра! 🐱"
         
         city_name = q.strip()
+        if not city_name:
+            game = city_games[user_id]
+            return f"Напиши город на букву {game['last_letter'].upper()}! 🐱"
+        
         game = city_games[user_id]
         
-        is_valid, msg = is_valid_city(city_name, game["last_letter"], game["used_cities"])
-        if not is_valid:
-            return f"{msg} 🐱"
-        
-        exists, msg = check_city_exists(city_name)
+        # Проверка через базу городов
+        exists, msg = check_city_in_db(CITIES_DB, city_name, game["used_cities"])
         if not exists:
-            return f"{msg}. Попробуй другой город. 🐱"
+            return msg
         
+        # Проверка первой буквы
+        if city_name[0].lower() != game["last_letter"]:
+            return f"Город должен начинаться на букву {game['last_letter'].upper()}! 🐱"
+        
+        # Принимаем город
         game["used_cities"].append(city_name.lower())
         game["user_cities_count"] = game.get("user_cities_count", 0) + 1
         next_letter = get_last_letter(city_name)
-        if not next_letter and len(city_name) > 1:
-            next_letter = city_name[-2].lower()
         game["last_letter"] = next_letter
         
         return f"✅ Принято! {city_name}. Тебе на букву {next_letter.upper()}. 🐱"
@@ -491,16 +551,6 @@ def fallback_response(question, user_id, user_name, search_results=None, include
                        "спорт", "гарем", "этти", "школа", "киберпанк", "военное"]
         for genre in genres_list:
             if genre in q:
-                return get_random_anime(genre=genre)
-        return get_random_anime()
-    
-    elif "топ" in q and "аниме" in q:
-        genres_list = ["боевик", "романтика", "комедия", "фэнтези", "драма", "ужасы", 
-                       "фантастика", "триллер", "детектив", "меха", "повседневность", 
-                       "психологическое", "историческое", "приключения", "мистика", 
-                       "спорт", "гарем", "этти", "школа", "киберпанк", "военное"]
-        for genre in genres_list:
-            if genre in q:
                 return get_top_anime(genre=genre)
         return get_top_anime()
     
@@ -554,6 +604,41 @@ def handle_message(message):
 
     if not is_allowed_chat(chat_id):
         print(f"❌ Заблокирован чат: {chat_id}")
+        return
+
+    # ====== 🎮 ИГРА В ГОРОДА (ПЕРВООЧЕРЕДНАЯ ПРОВЕРКА) ======
+    if user_id in city_games:
+        if text_lower in ["сдаюсь", "выйти", "закончить"]:
+            game = city_games.pop(user_id)
+            user_cities = game.get("user_cities_count", 0)
+            bot.reply_to(message, f"🏆 Игра окончена! Ты назвал {user_cities} городов. Хорошая игра! 🐱")
+            return
+        
+        if not text.strip():
+            game = city_games[user_id]
+            bot.reply_to(message, f"Напиши город на букву {game['last_letter'].upper()}! 🐱")
+            return
+        
+        game = city_games[user_id]
+        
+        # Проверка через базу городов
+        exists, msg = check_city_in_db(CITIES_DB, text, game["used_cities"])
+        if not exists:
+            bot.reply_to(message, msg)
+            return
+        
+        # Проверка первой буквы
+        if text[0].lower() != game["last_letter"]:
+            bot.reply_to(message, f"Город должен начинаться на букву {game['last_letter'].upper()}! 🐱")
+            return
+        
+        # Принимаем город пользователя
+        game["used_cities"].append(text.lower())
+        game["user_cities_count"] = game.get("user_cities_count", 0) + 1
+        next_letter = get_last_letter(text)
+        game["last_letter"] = next_letter
+        
+        bot.reply_to(message, f"✅ Принято! {text}. Тебе на букву {next_letter.upper()}. 🐱")
         return
 
     if "мой айди" in text_lower or "мой id" in text_lower:
@@ -628,9 +713,9 @@ def handle_message(message):
         bot.reply_to(message, answer)
         return
 
-    # ====== 🎮 ИГРА В ГОРОДА ======
+    # ====== 🎮 ИГРА В ГОРОДА (КОМАНДА СТАРТ) ======
     if "сыграем в города" in text_lower or "игра города" in text_lower or "поиграем в города" in text_lower:
-        answer = fallback_response(text_lower, user_id, user_name, None, False)
+        answer = start_city_game(user_id)
         bot.reply_to(message, answer)
         return
 
@@ -671,6 +756,7 @@ if __name__ == "__main__":
     print(f"Разрешённые чаты: {ALLOWED_CHATS}")
     print(f"Режим: {bot_settings['mode']} | Токены: {bot_settings['max_tokens']} | Температура: {bot_settings['temperature']}")
     print(f"Текущая дата: {CURRENT_DAY}.{CURRENT_MONTH}.{CURRENT_YEAR}")
+    print(f"База городов: {sum(len(v) for v in CITIES_DB.values()) if CITIES_DB else 0} городов")
     print("=" * 50)
 
     while True:
