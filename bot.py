@@ -36,9 +36,9 @@ user_preferences = defaultdict(list)
 MAX_MEMORY = 20
 is_sleeping = False
 
-# ====== 💾 КЭШ АНИМЕ ======
+# ====== 💾 КЭШ АНИМЕ (только для поиска по названию и топа) ======
 CACHE_FILE = "anime_cache.json"
-CACHE_EXPIRATION = 86400
+CACHE_EXPIRATION = 86400  # 24 часа
 
 def load_cache():
     if os.path.exists(CACHE_FILE):
@@ -195,15 +195,145 @@ def recommend_from_history(user_id):
         return get_random_anime()
     return get_random_anime(genres=prefs[-2:])
 
-# ====== 🎬 АНИМЕ API ======
+# ====== 🎬 АНИМЕ API (Shikimori + AniList резервный) ======
+
+# 1. Поиск на Shikimori
+def search_anime_shikimori(anime_name):
+    try:
+        url = "https://shikimori.one/api/animes"
+        params = {"search": anime_name, "limit": 5}
+        headers = {"User-Agent": "KotBot/2.0"}
+
+        response = requests.get(url, params=params, headers=headers, timeout=10)
+
+        if response.status_code == 200:
+            data = response.json()
+            if data:
+                anime = max(data, key=lambda x: float(x.get("score") or 0))
+                name_ru = anime.get("russian") or anime.get("name", "???")
+                name_en = anime.get("name", "???")
+                score = anime.get("score", "?")
+                episodes = anime.get("episodes", "?")
+                year = anime.get("released_on", "?")[:4] if anime.get("released_on") else "?"
+                genres = ", ".join([g["name"] for g in anime.get("genres", [])[:5]])
+
+                return {
+                    "success": True,
+                    "name_ru": name_ru,
+                    "name_en": name_en,
+                    "score": score,
+                    "episodes": episodes,
+                    "year": year,
+                    "genres": genres,
+                    "url": f"https://shikimori.one/animes/{anime['id']}",
+                    "source": "Shikimori"
+                }
+        return {"success": False}
+    except Exception as e:
+        logger.error(f"Ошибка Shikimori: {e}")
+        return {"success": False}
+
+# 2. Поиск на AniList (резервный)
+def search_anime_anilist(anime_name):
+    try:
+        url = "https://graphql.anilist.co"
+        query = """
+        query ($search: String) {
+          Media(search: $search, type: ANIME) {
+            title {
+              romaji
+              english
+              native
+            }
+            averageScore
+            episodes
+            seasonYear
+            genres
+            description(asHtml: false)
+            siteUrl
+          }
+        }
+        """
+        variables = {"search": anime_name}
+        response = requests.post(url, json={"query": query, "variables": variables}, timeout=10)
+
+        if response.status_code == 200:
+            data = response.json()
+            media = data.get("data", {}).get("Media")
+            if media:
+                name_ru = media.get("title", {}).get("native") or media.get("title", {}).get("english") or media.get("title", {}).get("romaji") or "???"
+                name_en = media.get("title", {}).get("romaji") or "???"
+                score = media.get("averageScore", "?")
+                if score != "?":
+                    score = score / 10
+                episodes = media.get("episodes", "?")
+                year = media.get("seasonYear", "?")
+                genres = ", ".join(media.get("genres", [])[:5])
+                description = (media.get("description") or "Описание отсутствует")[:200]
+
+                return {
+                    "success": True,
+                    "name_ru": name_ru,
+                    "name_en": name_en,
+                    "score": f"{score}/10" if score != "?" else "?",
+                    "episodes": episodes,
+                    "year": year,
+                    "genres": genres,
+                    "url": media.get("siteUrl", ""),
+                    "source": "AniList"
+                }
+        return {"success": False}
+    except Exception as e:
+        logger.error(f"Ошибка AniList: {e}")
+        return {"success": False}
+
+# 3. Основная функция поиска (Shikimori -> AniList)
+def search_anime_by_name(anime_name):
+    try:
+        # Проверка кэша
+        if anime_name in anime_cache:
+            cache_time = anime_cache[anime_name].get("timestamp", 0)
+            if time.time() - cache_time < CACHE_EXPIRATION:
+                logger.info(f"Возврат из кэша: {anime_name}")
+                return anime_cache[anime_name]["result"]
+
+        # Сначала Shikimori
+        result = search_anime_shikimori(anime_name)
+        
+        # Если не нашёл — AniList
+        if not result["success"]:
+            logger.info(f"Shikimori не нашёл {anime_name}, пробуем AniList")
+            result = search_anime_anilist(anime_name)
+        
+        if result["success"]:
+            output = f"""🎬 «{result['name_ru']}» ({result['name_en']})
+
+📅 {result['year']}
+⭐ {result['score']}
+🎭 {result['genres']}
+📺 {result['episodes']} эп.
+
+🔗 {result['url']}
+🐱"""
+            if result['source'] == "AniList":
+                output += "\n⚡ (найдено через AniList)"
+
+            # Сохраняем в кэш
+            anime_cache[anime_name] = {"result": output, "timestamp": time.time()}
+            save_cache()
+            return output
+        
+        return f"Не нашёл «{anime_name}» ни в Shikimori, ни в AniList 😿 🐱"
+
+    except Exception as e:
+        logger.error(f"Ошибка search_anime_by_name: {e}")
+        return "Ошибка! Попробуй другое название. 🐱"
+
+# 4. Случайное аниме (БЕЗ кэша)
 def get_random_anime(genres=None, year=None):
     try:
-        cache_key = f"random_{str(genres)}_{year}"
-        if cache_key in anime_cache:
-            cache_time = anime_cache[cache_key].get("timestamp", 0)
-            if time.time() - cache_time < CACHE_EXPIRATION:
-                return anime_cache[cache_key]["result"]
-
+        # 🔥 БЕЗ ПРОВЕРКИ КЭША — каждый раз новое
+        
         url = "https://shikimori.one/api/animes"
         headers = {"User-Agent": "KotBot-Pro"}
 
@@ -224,7 +354,7 @@ def get_random_anime(genres=None, year=None):
         data = r.json()
 
         if year:
-            data = [a for a in data if a.get("released_on","") and a.get("released_on","").startswith(str(year))]
+            data = [a for a in data if a.get("released_on") and a.get("released_on", "").startswith(str(year))]
 
         if not data:
             return "Ничего не нашёл 😿 🐱"
@@ -238,7 +368,7 @@ def get_random_anime(genres=None, year=None):
         episodes = anime.get("episodes","?")
         year_anime = anime.get("released_on","?")[:4] if anime.get("released_on") else "?"
 
-        result = f"""🎲 Тебе выпало:
+        return f"""🎲 Тебе выпало:
 
 🎬 «{name_ru}» ({name_en})
 ⭐ {score}/10
@@ -248,63 +378,11 @@ def get_random_anime(genres=None, year=None):
 
 Приятного просмотра! 🐱"""
 
-        anime_cache[cache_key] = {"result": result, "timestamp": time.time()}
-        save_cache()
-
-        return result
-
     except Exception as e:
         logger.error(f"Ошибка get_random_anime: {e}")
         return "Ошибка 😿 🐱"
 
-def search_anime_by_name(anime_name):
-    try:
-        if anime_name in anime_cache:
-            cache_time = anime_cache[anime_name].get("timestamp", 0)
-            if time.time() - cache_time < CACHE_EXPIRATION:
-                return anime_cache[anime_name]["result"]
-
-        url = "https://shikimori.one/api/animes"
-        params = {"search": anime_name, "limit": 5}
-        headers = {"User-Agent": "KotBot/2.0"}
-
-        response = requests.get(url, params=params, headers=headers, timeout=10)
-
-        if response.status_code != 200:
-            return "Ошибка API 🐱"
-
-        data = response.json()
-        if not data:
-            return f"Не нашёл «{anime_name}» 😿 🐱"
-
-        anime = max(data, key=lambda x: float(x.get("score") or 0))
-
-        name_ru = anime.get("russian") or anime.get("name", "???")
-        name_en = anime.get("name", "???")
-        score = anime.get("score", "?")
-        episodes = anime.get("episodes", "?")
-        year = anime.get("released_on", "?")[:4] if anime.get("released_on") else "?"
-        genres = ", ".join([g["name"] for g in anime.get("genres", [])[:5]])
-
-        result = f"""🎬 «{name_ru}» ({name_en})
-
-📅 {year}
-⭐ {score}/10
-🎭 {genres}
-📺 {episodes} эп.
-
-https://shikimori.one/animes/{anime['id']}
-🐱"""
-
-        anime_cache[anime_name] = {"result": result, "timestamp": time.time()}
-        save_cache()
-
-        return result
-
-    except Exception as e:
-        logger.error(f"Ошибка search_anime_by_name: {e}")
-        return "Ошибка 😿 🐱"
-
+# 5. Топ аниме (с кэшем)
 def get_top_anime(genre=None, year=None, limit=10):
     try:
         cache_key = f"top_{genre}_{year}_{limit}"
@@ -333,11 +411,9 @@ def get_top_anime(genre=None, year=None, limit=10):
 
         data = response.json()
 
-        # Фильтр по году (с проверкой на None)
         if year:
-            data = [a for a in data if a.get("released_on") is not None and a.get("released_on", "").startswith(str(year))]
+            data = [a for a in data if a.get("released_on") and a.get("released_on", "").startswith(str(year))]
 
-        # Сортировка по рейтингу
         data = sorted(data, key=lambda x: float(x.get("score") or 0), reverse=True)
 
         if not data:
@@ -500,7 +576,7 @@ def handle_message(message):
     if chat_id not in ALLOWED_CHATS:
         return
 
-    # ====== 😴 РЕЖИМ СНА (сначала проверяем команды хозяина) ======
+    # ====== 😴 РЕЖИМ СНА ======
     if user_id == MASTER_USER_ID:
         if "кот спать" in text_lower:
             is_sleeping = True
@@ -512,19 +588,16 @@ def handle_message(message):
             bot.reply_to(message, f"Доброе утро, {user_name}! ☀️🐱")
             return
 
-    # Если бот спит — НЕ РЕАГИРУЕМ НИ НА ЧТО
     if is_sleeping:
         return
 
-    # ====== 🔥 ПРОВЕРКА: реагируем ТОЛЬКО если:
-    # 1. Сообщение начинается с "кот" (или "Кот")
-    # 2. ИЛИ это ответ на сообщение бота ======
+    # ====== ПРОВЕРКА: реагируем только на "кот" или реплай ======
     starts_with_cat = text_lower.startswith("кот")
     
     if not starts_with_cat and not is_reply_to_bot:
         return
 
-    # Убираем "кот" из начала сообщения
+    # Убираем "кот" из начала
     clean_text = text
     if starts_with_cat:
         clean_text = re.sub(r'^[Кк]от[,\s]*', '', text).strip()
@@ -536,7 +609,43 @@ def handle_message(message):
 
     logger.info(f"Сообщение от {user_name}: {clean_text[:50]}")
 
-    # ====== ⚙️ НАСТРОЙКИ (только для хозяина) ======
+    # ====== 🎮 ИГРА В ГОРОДА ======
+    if user_id in city_games:
+        if text_lower in ["сдаюсь", "выйти", "закончить"]:
+            game = city_games.pop(user_id)
+            bot.reply_to(message, f"🏆 Игра окончена! Ты назвал {game['user_cities_count']} городов. 🐱")
+            return
+        if not clean_text.strip():
+            game = city_games[user_id]
+            bot.reply_to(message, f"Напиши город на букву {game['last_letter'].upper()}! 🐱")
+            return
+        game = city_games[user_id]
+        exists, msg = check_city_in_db(CITIES_DB, clean_text, game["used_cities"])
+        if not exists:
+            bot.reply_to(message, msg)
+            return
+        if clean_text[0].lower() != game["last_letter"]:
+            bot.reply_to(message, f"Город должен начинаться на букву {game['last_letter'].upper()}! 🐱")
+            return
+        game["used_cities"].append(clean_text.lower())
+        game["user_cities_count"] += 1
+        next_letter = get_last_letter(clean_text)
+        bot_city = get_city_by_letter(CITIES_DB, next_letter, game["used_cities"])
+        if bot_city:
+            game["used_cities"].append(bot_city.lower())
+            game["last_letter"] = get_last_letter(bot_city)
+            reply = f"✅ {clean_text}\n\n🤖 {bot_city}\n🎯 Тебе на {game['last_letter'].upper()}! 🐱"
+        else:
+            city_games.pop(user_id)
+            reply = f"✅ {clean_text}\n\n🏆 Я не нашёл город на {next_letter.upper()}! Ты победил! 🐱"
+        bot.reply_to(message, reply)
+        return
+
+    if any(x in clean_text.lower() for x in ["сыграем в города", "игра города", "поиграем в города", "давай играть в города"]):
+        bot.reply_to(message, start_city_game(user_id))
+        return
+
+    # ====== ⚙️ НАСТРОЙКИ ======
     if user_id == MASTER_USER_ID:
         if "настройки" in text_lower and "показать" not in text_lower:
             bot.reply_to(message, get_settings_text())
@@ -588,42 +697,6 @@ def handle_message(message):
             bot_settings["temperature"] = 0.7
             bot.reply_to(message, "✅ Включён обычный режим. 🐱")
             return
-
-    # ====== 🎮 ИГРА В ГОРОДА ======
-    if user_id in city_games:
-        if text_lower in ["сдаюсь", "выйти", "закончить"]:
-            game = city_games.pop(user_id)
-            bot.reply_to(message, f"🏆 Игра окончена! Ты назвал {game['user_cities_count']} городов. 🐱")
-            return
-        if not clean_text.strip():
-            game = city_games[user_id]
-            bot.reply_to(message, f"Напиши город на букву {game['last_letter'].upper()}! 🐱")
-            return
-        game = city_games[user_id]
-        exists, msg = check_city_in_db(CITIES_DB, clean_text, game["used_cities"])
-        if not exists:
-            bot.reply_to(message, msg)
-            return
-        if clean_text[0].lower() != game["last_letter"]:
-            bot.reply_to(message, f"Город должен начинаться на букву {game['last_letter'].upper()}! 🐱")
-            return
-        game["used_cities"].append(clean_text.lower())
-        game["user_cities_count"] += 1
-        next_letter = get_last_letter(clean_text)
-        bot_city = get_city_by_letter(CITIES_DB, next_letter, game["used_cities"])
-        if bot_city:
-            game["used_cities"].append(bot_city.lower())
-            game["last_letter"] = get_last_letter(bot_city)
-            reply = f"✅ {clean_text}\n\n🤖 {bot_city}\n🎯 Тебе на {game['last_letter'].upper()}! 🐱"
-        else:
-            city_games.pop(user_id)
-            reply = f"✅ {clean_text}\n\n🏆 Я не нашёл город на {next_letter.upper()}! Ты победил! 🐱"
-        bot.reply_to(message, reply)
-        return
-
-    if "сыграем в города" in text_lower:
-        bot.reply_to(message, start_city_game(user_id))
-        return
 
     # ====== 🎬 АНИМЕ ======
     if "посоветуй аниме" in text_lower:
