@@ -36,7 +36,7 @@ user_preferences = defaultdict(list)
 MAX_MEMORY = 20
 is_sleeping = False
 
-# ====== 💾 КЭШ АНИМЕ (только для поиска по названию и топа) ======
+# ====== 💾 КЭШ АНИМЕ ======
 CACHE_FILE = "anime_cache.json"
 CACHE_EXPIRATION = 86400  # 24 часа
 
@@ -147,39 +147,29 @@ def start_city_game(user_id):
     }
     return f"🎮 Играем в города! Я называю {start_city}. Тебе на букву {last_letter.upper()}. Твой ход! 🐱"
 
-# ====== 🎭 ЖАНРЫ ======
-GENRES_LIST = [
-    "боевик","экшн","романтика","комедия","фэнтези","драма",
-    "ужасы","фантастика","триллер","детектив","меха","киберпанк",
-    "школа","спорт","гарем","этти","психология","мистика"
-]
-
-GENRE_IDS = {
-    "экшн":1,"боевик":1,
-    "приключения":2,
-    "комедия":4,
-    "драма":8,
-    "фэнтези":10,"фентези":10,
-    "ужасы":14,"хоррор":14,
-    "романтика":22,
-    "фантастика":24,
-    "мистика":7,
-    "психология":40,
-    "школа":23,
-    "спорт":30,
-    "гарем":35,
-    "этти":9,
-    "меха":18,
-    "военное":38,
-    "детектив":39,
-    "триллер":41,
-    "киберпанк":43
+# ====== 🎭 ЖАНРЫ (для AniList) ======
+GENRE_MAP = {
+    "боевик": "Action", "экшн": "Action",
+    "романтика": "Romance",
+    "комедия": "Comedy",
+    "фэнтези": "Fantasy", "фентези": "Fantasy",
+    "драма": "Drama",
+    "ужасы": "Horror", "хоррор": "Horror",
+    "фантастика": "Sci-Fi",
+    "триллер": "Thriller",
+    "детектив": "Mystery",
+    "меха": "Mecha",
+    "киберпанк": "Cyberpunk",
+    "школа": "School",
+    "спорт": "Sports",
+    "психология": "Psychological",
+    "мистика": "Mystery"
 }
 
 # ====== 🎯 ПАРСИНГ ======
 def parse_anime_request(text):
     text = text.lower()
-    genres = [g for g in GENRES_LIST if g in text]
+    genres = [g for g in GENRE_MAP.keys() if g in text]
     year_match = re.search(r'\b(19|20)\d{2}\b', text)
     year = year_match.group(0) if year_match else None
     return genres, year
@@ -195,178 +185,127 @@ def recommend_from_history(user_id):
         return get_random_anime()
     return get_random_anime(genres=prefs[-2:])
 
-# ====== 🎬 АНИМЕ API (Shikimori + AniList резервный) ======
+# ====== 🎬 АНИМЕ API (AniList - основной) ======
 
-# 1. Поиск на Shikimori
-def search_anime_shikimori(anime_name):
+# 1. Поиск на AniList
+def search_anime_anilist(search_query, search_type="search"):
+    """
+    search_type: "search" - поиск по названию
+                 "random" - случайное аниме
+                 "top" - топ аниме
+    """
     try:
-        url = "https://shikimori.one/api/animes"
-        params = {"search": anime_name, "limit": 5}
-        headers = {"User-Agent": "KotBot/2.0"}
-
-        response = requests.get(url, params=params, headers=headers, timeout=10)
-
-        if response.status_code == 200:
-            data = response.json()
-            if data:
-                anime = max(data, key=lambda x: float(x.get("score") or 0))
-                name_ru = anime.get("russian") or anime.get("name", "???")
-                name_en = anime.get("name", "???")
-                score = anime.get("score", "?")
-                episodes = anime.get("episodes", "?")
-                year = anime.get("released_on", "?")[:4] if anime.get("released_on") else "?"
-                genres = ", ".join([g["name"] for g in anime.get("genres", [])[:5]])
-
-                return {
-                    "success": True,
-                    "name_ru": name_ru,
-                    "name_en": name_en,
-                    "score": score,
-                    "episodes": episodes,
-                    "year": year,
-                    "genres": genres,
-                    "url": f"https://shikimori.one/animes/{anime['id']}",
-                    "source": "Shikimori"
-                }
-        return {"success": False}
-    except Exception as e:
-        logger.error(f"Ошибка Shikimori: {e}")
-        return {"success": False}
-
-# 2. Поиск на AniList (резервный)
-def search_anime_anilist(anime_name):
-    try:
-        url = "https://graphql.anilist.co"
-        query = """
-        query ($search: String) {
-          Media(search: $search, type: ANIME) {
-            title {
-              romaji
-              english
-              native
+        if search_type == "search":
+            query = """
+            query ($search: String) {
+              Media(search: $search, type: ANIME) {
+                id
+                title { romaji english native }
+                averageScore
+                episodes
+                seasonYear
+                genres
+                description(asHtml: false)
+                siteUrl
+              }
             }
-            averageScore
-            episodes
-            seasonYear
-            genres
-            description(asHtml: false)
-            siteUrl
-          }
-        }
-        """
-        variables = {"search": anime_name}
-        response = requests.post(url, json={"query": query, "variables": variables}, timeout=10)
+            """
+            variables = {"search": search_query}
+        
+        elif search_type == "random":
+            query = """
+            query ($page: Int, $perPage: Int, $genre: String, $year: Int) {
+              Page(page: $page, perPage: $perPage) {
+                media(type: ANIME, sort: POPULARITY_DESC, genre: $genre, seasonYear: $year) {
+                  id
+                  title { romaji english native }
+                  averageScore
+                  episodes
+                  seasonYear
+                  genres
+                  description(asHtml: false)
+                  siteUrl
+                }
+              }
+            }
+            """
+            variables = {"page": 1, "perPage": 50}
+            if search_query.get("genre"):
+                variables["genre"] = search_query["genre"]
+            if search_query.get("year"):
+                variables["year"] = int(search_query["year"])
+        
+        elif search_type == "top":
+            query = """
+            query ($page: Int, $perPage: Int, $genre: String, $year: Int) {
+              Page(page: $page, perPage: $perPage) {
+                media(type: ANIME, sort: SCORE_DESC, genre: $genre, seasonYear: $year) {
+                  id
+                  title { romaji english native }
+                  averageScore
+                  episodes
+                  seasonYear
+                  genres
+                  siteUrl
+                }
+              }
+            }
+            """
+            variables = {"page": 1, "perPage": 50}
+            if search_query.get("genre"):
+                variables["genre"] = search_query["genre"]
+            if search_query.get("year"):
+                variables["year"] = int(search_query["year"])
+
+        url = "https://graphql.anilist.co"
+        response = requests.post(url, json={"query": query, "variables": variables}, timeout=15)
 
         if response.status_code == 200:
             data = response.json()
-            media = data.get("data", {}).get("Media")
-            if media:
-                name_ru = media.get("title", {}).get("native") or media.get("title", {}).get("english") or media.get("title", {}).get("romaji") or "???"
-                name_en = media.get("title", {}).get("romaji") or "???"
-                score = media.get("averageScore", "?")
-                if score != "?":
-                    score = score / 10
-                episodes = media.get("episodes", "?")
-                year = media.get("seasonYear", "?")
-                genres = ", ".join(media.get("genres", [])[:5])
-                description = (media.get("description") or "Описание отсутствует")[:200]
-
-                return {
-                    "success": True,
-                    "name_ru": name_ru,
-                    "name_en": name_en,
-                    "score": f"{score}/10" if score != "?" else "?",
-                    "episodes": episodes,
-                    "year": year,
-                    "genres": genres,
-                    "url": media.get("siteUrl", ""),
-                    "source": "AniList"
-                }
+            if search_type == "search":
+                media = data.get("data", {}).get("Media")
+                if media:
+                    return {"success": True, "data": [media], "source": "AniList"}
+            else:
+                media_list = data.get("data", {}).get("Page", {}).get("media", [])
+                if media_list:
+                    return {"success": True, "data": media_list, "source": "AniList"}
         return {"success": False}
     except Exception as e:
         logger.error(f"Ошибка AniList: {e}")
         return {"success": False}
 
-# 3. Основная функция поиска (Shikimori -> AniList)
-def search_anime_by_name(anime_name):
-    try:
-        # Проверка кэша
-        if anime_name in anime_cache:
-            cache_time = anime_cache[anime_name].get("timestamp", 0)
-            if time.time() - cache_time < CACHE_EXPIRATION:
-                logger.info(f"Возврат из кэша: {anime_name}")
-                return anime_cache[anime_name]["result"]
-
-        # Сначала Shikimori
-        result = search_anime_shikimori(anime_name)
-        
-        # Если не нашёл — AniList
-        if not result["success"]:
-            logger.info(f"Shikimori не нашёл {anime_name}, пробуем AniList")
-            result = search_anime_anilist(anime_name)
-        
-        if result["success"]:
-            output = f"""🎬 «{result['name_ru']}» ({result['name_en']})
-
-📅 {result['year']}
-⭐ {result['score']}
-🎭 {result['genres']}
-📺 {result['episodes']} эп.
-
-🔗 {result['url']}
-🐱"""
-            if result['source'] == "AniList":
-                output += "\n⚡ (найдено через AniList)"
-
-            # Сохраняем в кэш
-            anime_cache[anime_name] = {"result": output, "timestamp": time.time()}
-            save_cache()
-            return output
-        
-        return f"Не нашёл «{anime_name}» ни в Shikimori, ни в AniList 😿 🐱"
-
-    except Exception as e:
-        logger.error(f"Ошибка search_anime_by_name: {e}")
-        return "Ошибка! Попробуй другое название. 🐱"
-
-# 4. Случайное аниме (БЕЗ кэша)
+# 2. Случайное аниме
 def get_random_anime(genres=None, year=None):
     try:
-        # 🔥 БЕЗ ПРОВЕРКИ КЭША — каждый раз новое
-        
-        url = "https://shikimori.one/api/animes"
-        headers = {"User-Agent": "KotBot-Pro"}
-
-        params = {"limit": 100, "order": "random", "status": "released"}
-
+        # Преобразуем жанры
+        anilist_genres = None
         if genres:
-            ids = [str(GENRE_IDS[g]) for g in genres if g in GENRE_IDS]
-            if ids:
-                params["genre"] = ",".join(ids)
+            anilist_genres = [GENRE_MAP.get(g, g.capitalize()) for g in genres if g in GENRE_MAP]
+            if anilist_genres:
+                anilist_genres = anilist_genres[0]  # Берём первый жанр
 
-        if year:
-            params["season"] = f"{year}_year"
-
-        r = requests.get(url, params=params, headers=headers, timeout=15)
-        if r.status_code != 200:
-            return "Ошибка API 🐱"
-
-        data = r.json()
-
-        if year:
-            data = [a for a in data if a.get("released_on") and a.get("released_on", "").startswith(str(year))]
-
-        if not data:
+        result = search_anime_anilist({"genre": anilist_genres, "year": year}, "random")
+        
+        if not result["success"] or not result["data"]:
+            if genres and year:
+                return f"Не нашёл аниме в жанре {', '.join(genres)} за {year} год 😿 🐱"
+            if genres:
+                return f"Не нашёл аниме в жанре {', '.join(genres)} 😿 🐱"
+            if year:
+                return f"Не нашёл аниме за {year} год 😿 🐱"
             return "Ничего не нашёл 😿 🐱"
 
-        anime = random.choice(data)
-
-        name_ru = anime.get("russian") or anime.get("name","?")
-        name_en = anime.get("name","?")
-        score = anime.get("score","?")
-        genres_list = ", ".join([g["name"] for g in anime.get("genres",[])[:3]])
-        episodes = anime.get("episodes","?")
-        year_anime = anime.get("released_on","?")[:4] if anime.get("released_on") else "?"
+        anime = random.choice(result["data"])
+        title = anime.get("title", {})
+        name_ru = title.get("native") or title.get("english") or title.get("romaji") or "???"
+        name_en = title.get("romaji") or "???"
+        score = anime.get("averageScore", "?")
+        if score != "?":
+            score = score / 10
+        episodes = anime.get("episodes", "?")
+        year_anime = anime.get("seasonYear", "?")
+        genres_list = ", ".join(anime.get("genres", [])[:3])
 
         return f"""🎲 Тебе выпало:
 
@@ -382,63 +321,100 @@ def get_random_anime(genres=None, year=None):
         logger.error(f"Ошибка get_random_anime: {e}")
         return "Ошибка 😿 🐱"
 
-# 5. Топ аниме (с кэшем)
+# 3. Поиск по названию
+def search_anime_by_name(anime_name):
+    try:
+        # Проверка кэша
+        if anime_name in anime_cache:
+            cache_time = anime_cache[anime_name].get("timestamp", 0)
+            if time.time() - cache_time < CACHE_EXPIRATION:
+                return anime_cache[anime_name]["result"]
+
+        result = search_anime_anilist(anime_name, "search")
+        
+        if result["success"] and result["data"]:
+            anime = result["data"][0]
+            title = anime.get("title", {})
+            name_ru = title.get("native") or title.get("english") or title.get("romaji") or "???"
+            name_en = title.get("romaji") or "???"
+            score = anime.get("averageScore", "?")
+            if score != "?":
+                score = score / 10
+            episodes = anime.get("episodes", "?")
+            year = anime.get("seasonYear", "?")
+            genres = ", ".join(anime.get("genres", [])[:5])
+
+            output = f"""🎬 «{name_ru}» ({name_en})
+
+📅 {year}
+⭐ {score}/10
+🎭 {genres}
+📺 {episodes} эп.
+
+🔗 https://anilist.co/anime/{anime['id']}
+🐱"""
+
+            anime_cache[anime_name] = {"result": output, "timestamp": time.time()}
+            save_cache()
+            return output
+        
+        return f"Не нашёл «{anime_name}» 😿 🐱"
+
+    except Exception as e:
+        logger.error(f"Ошибка search_anime_by_name: {e}")
+        return "Ошибка! Попробуй другое название. 🐱"
+
+# 4. Топ аниме
 def get_top_anime(genre=None, year=None, limit=10):
     try:
         cache_key = f"top_{genre}_{year}_{limit}"
-
         if cache_key in anime_cache:
             cache_time = anime_cache[cache_key].get("timestamp", 0)
             if time.time() - cache_time < CACHE_EXPIRATION:
                 return anime_cache[cache_key]["result"]
 
-        url = "https://shikimori.one/api/animes"
-        headers = {"User-Agent": "KotBot/2.0"}
+        # Преобразуем жанр
+        anilist_genre = None
+        if genre:
+            anilist_genre = GENRE_MAP.get(genre, genre.capitalize())
 
-        params = {
-            "limit": 50,
-            "order": "ranked",
-            "status": "released"
-        }
-
-        if genre and genre in GENRE_IDS:
-            params["genre"] = str(GENRE_IDS[genre])
-
-        response = requests.get(url, params=params, headers=headers, timeout=15)
-
-        if response.status_code != 200:
-            return "Ошибка API 🐱"
-
-        data = response.json()
-
-        if year:
-            data = [a for a in data if a.get("released_on") and a.get("released_on", "").startswith(str(year))]
-
-        data = sorted(data, key=lambda x: float(x.get("score") or 0), reverse=True)
-
-        if not data:
+        result = search_anime_anilist({"genre": anilist_genre, "year": year}, "top")
+        
+        if not result["success"] or not result["data"]:
+            if year and genre:
+                return f"Не нашёл топ аниме в жанре {genre} за {year} год 😿 🐱"
             if year:
-                return f"Ничего не нашёл за {year} год 😿 Попробуй другой год. 🐱"
+                return f"Не нашёл топ аниме за {year} год 😿 🐱"
+            if genre:
+                return f"Не нашёл топ аниме в жанре {genre} 😿 🐱"
             return "Ничего не нашёл 😿 🐱"
 
-        result = f"🔥 Топ-{min(limit, len(data))}"
+        data = result["data"][:limit]
+
+        result_text = f"🔥 Топ-{min(limit, len(data))}"
         if genre:
-            result += f" в жанре {genre}"
+            result_text += f" в жанре {genre}"
         if year:
-            result += f" за {year} год"
-        result += ":\n\n"
+            result_text += f" за {year} год"
+        result_text += ":\n\n"
 
-        for i, anime in enumerate(data[:limit], 1):
-            name = anime.get("russian") or anime.get("name", "???")
-            score = anime.get("score", "?")
-            result += f"{i}. «{name}» — {score}/10 ⭐\n"
+        for i, anime in enumerate(data, 1):
+            title = anime.get("title", {})
+            name = title.get("native") or title.get("english") or title.get("romaji") or "???"
+            score = anime.get("averageScore", "?")
+            if score != "?":
+                score = score / 10
+            episodes = anime.get("episodes", "?")
+            year_anime = anime.get("seasonYear", "?")
+            result_text += f"{i}. «{name}» — {score}/10 ⭐\n"
+            result_text += f"   📺 {episodes} эп. | 📅 {year_anime}\n"
 
-        result += "\n🐱"
+        result_text += "\n🐱"
 
-        anime_cache[cache_key] = {"result": result, "timestamp": time.time()}
+        anime_cache[cache_key] = {"result": result_text, "timestamp": time.time()}
         save_cache()
 
-        return result
+        return result_text
 
     except Exception as e:
         logger.error(f"Ошибка get_top_anime: {e}")
@@ -591,13 +567,15 @@ def handle_message(message):
     if is_sleeping:
         return
 
-    # ====== ПРОВЕРКА: реагируем только на "кот" или реплай ======
+    # ====== ПРОВЕРКА: реагируем только если:
+    # 1. Сообщение начинается с "кот" (или "Кот")
+    # 2. ИЛИ это ответ на сообщение бота ======
     starts_with_cat = text_lower.startswith("кот")
     
     if not starts_with_cat and not is_reply_to_bot:
         return
 
-    # Убираем "кот" из начала
+    # Убираем "кот" из начала сообщения (если оно есть)
     clean_text = text
     if starts_with_cat:
         clean_text = re.sub(r'^[Кк]от[,\s]*', '', text).strip()
@@ -641,7 +619,7 @@ def handle_message(message):
         bot.reply_to(message, reply)
         return
 
-    if any(x in clean_text.lower() for x in ["сыграем в города", "игра города", "поиграем в города", "давай играть в города"]):
+    if any(x in clean_text.lower() for x in ["сыграем в города", "игра города", "поиграем в города", "давай играть в города", "давай поиграем в города"]):
         bot.reply_to(message, start_city_game(user_id))
         return
 
@@ -699,11 +677,38 @@ def handle_message(message):
             return
 
     # ====== 🎬 АНИМЕ ======
-    if "посоветуй аниме" in text_lower:
-        genres, year = parse_anime_request(text_lower)
-        save_preferences(user_id, genres)
-        bot.reply_to(message, get_random_anime(genres, year))
-        return
+    # Проверяем, есть ли что-то связанное с аниме
+    anime_keywords = ["посоветуй аниме", "найди аниме", "топ аниме", "аниме"]
+    
+    if any(keyword in text_lower for keyword in anime_keywords):
+        # Случайное аниме
+        if "посоветуй аниме" in text_lower:
+            genres, year = parse_anime_request(text_lower)
+            save_preferences(user_id, genres)
+            bot.reply_to(message, get_random_anime(genres, year))
+            return
+        
+        # Поиск по названию
+        if "найди аниме" in text_lower:
+            anime_name = re.sub(r'(?i)найди аниме|найти аниме', '', clean_text).strip()
+            if not anime_name:
+                bot.reply_to(message, "Напиши название аниме после команды 🐱")
+                return
+            bot.reply_to(message, search_anime_by_name(anime_name))
+            return
+        
+        # Топ аниме
+        if "топ аниме" in text_lower:
+            genres_list = ["боевик", "романтика", "комедия", "фэнтези", "драма", "ужасы"]
+            found_genre = None
+            for genre in genres_list:
+                if genre in text_lower:
+                    found_genre = genre
+                    break
+            year_match = re.search(r'\b(19|20)\d{2}\b', text_lower)
+            year = year_match.group(0) if year_match else None
+            bot.reply_to(message, get_top_anime(genre=found_genre, year=year))
+            return
 
     if "порекомендуй что-нибудь" in text_lower or "что посмотреть" in text_lower:
         bot.reply_to(message, recommend_from_history(user_id))
@@ -715,26 +720,6 @@ def handle_message(message):
             bot.reply_to(message, f"Твои любимые жанры: {', '.join(prefs)} 🐱")
         else:
             bot.reply_to(message, "Я ещё не понял твой вкус. Попроси посоветовать аниме с жанрами! 🐱")
-        return
-
-    if "найди аниме" in text_lower:
-        anime_name = re.sub(r'(?i)найди аниме|найти аниме', '', clean_text).strip()
-        if not anime_name:
-            bot.reply_to(message, "Напиши название аниме после команды 🐱")
-            return
-        bot.reply_to(message, search_anime_by_name(anime_name))
-        return
-
-    if "топ аниме" in text_lower:
-        genres_list = ["боевик", "романтика", "комедия", "фэнтези", "драма", "ужасы"]
-        found_genre = None
-        for genre in genres_list:
-            if genre in text_lower:
-                found_genre = genre
-                break
-        year_match = re.search(r'\b(19|20)\d{2}\b', text_lower)
-        year = year_match.group(0) if year_match else None
-        bot.reply_to(message, get_top_anime(genre=found_genre, year=year))
         return
 
     # ====== 🌐 КОТОПОИСК ======
