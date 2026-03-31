@@ -8,7 +8,7 @@ import datetime
 import os
 import json
 import logging
-from googletrans import Translator
+from deep_translator import GoogleTranslator
 
 # ====== 📊 ЛОГИРОВАНИЕ ======
 logging.basicConfig(
@@ -60,24 +60,15 @@ def save_cache():
 anime_cache = load_cache()
 
 # ====== 🌐 ПЕРЕВОДЧИК ======
-translator = Translator()
-
 def translate_to_russian(text):
     """Переводит текст с японского/английского на русский"""
     try:
         if not text or text == "???":
             return text
         
-        # Пробуем определить язык
-        detected = translator.detect(text)
-        
-        # Если уже русский — возвращаем как есть
-        if detected.lang == 'ru':
-            return text
-        
-        # Переводим на русский
-        translated = translator.translate(text, dest='ru')
-        return translated.text
+        translator = GoogleTranslator(source='auto', target='ru')
+        translated = translator.translate(text)
+        return translated
     except Exception as e:
         logger.error(f"Ошибка перевода: {e}")
         return text
@@ -300,7 +291,6 @@ def search_anime_anilist(search_query, search_type="search"):
 # 2. Случайное аниме (с переводом)
 def get_random_anime(genres=None, year=None):
     try:
-        # Преобразуем жанры
         anilist_genres = None
         if genres:
             anilist_genres = [GENRE_MAP.get(g, g.capitalize()) for g in genres if g in GENRE_MAP]
@@ -321,7 +311,6 @@ def get_random_anime(genres=None, year=None):
         anime = random.choice(result["data"])
         title = anime.get("title", {})
         name_raw = title.get("native") or title.get("english") or title.get("romaji") or "???"
-        # 🔥 ПЕРЕВОД НА РУССКИЙ
         name_ru = translate_to_russian(name_raw)
         name_en = title.get("romaji") or "???"
         score = anime.get("averageScore", "?")
@@ -348,7 +337,6 @@ def get_random_anime(genres=None, year=None):
 # 3. Поиск по названию (с переводом)
 def search_anime_by_name(anime_name):
     try:
-        # Проверка кэша
         if anime_name in anime_cache:
             cache_time = anime_cache[anime_name].get("timestamp", 0)
             if time.time() - cache_time < CACHE_EXPIRATION:
@@ -360,7 +348,6 @@ def search_anime_by_name(anime_name):
             anime = result["data"][0]
             title = anime.get("title", {})
             name_raw = title.get("native") or title.get("english") or title.get("romaji") or "???"
-            # 🔥 ПЕРЕВОД НА РУССКИЙ
             name_ru = translate_to_russian(name_raw)
             name_en = title.get("romaji") or "???"
             score = anime.get("averageScore", "?")
@@ -399,7 +386,6 @@ def get_top_anime(genre=None, year=None, limit=10):
             if time.time() - cache_time < CACHE_EXPIRATION:
                 return anime_cache[cache_key]["result"]
 
-        # Преобразуем жанр
         anilist_genre = None
         if genre:
             anilist_genre = GENRE_MAP.get(genre, genre.capitalize())
@@ -427,7 +413,6 @@ def get_top_anime(genre=None, year=None, limit=10):
         for i, anime in enumerate(data, 1):
             title = anime.get("title", {})
             name_raw = title.get("native") or title.get("english") or title.get("romaji") or "???"
-            # 🔥 ПЕРЕВОД НА РУССКИЙ
             name_ru = translate_to_russian(name_raw)
             
             score = anime.get("averageScore", "?")
@@ -496,7 +481,7 @@ def add_to_memory(user_id, role, content):
 
 def clear_memory(user_id):
     user_memory[user_id] = []
-    user_preferences[user_id] = []  # Очищаем и вкусы
+    user_preferences[user_id] = []
     return "Забыл всё! Начинаем заново. 🐱"
 
 def ask_mistral(question, user_id, user_name, search_results=None, include_links=False):
@@ -603,7 +588,6 @@ def handle_message(message):
     
     starts_with_cat = False
     if text_lower.startswith("кот"):
-        # Проверяем, что после "кот" идёт пробел, запятая, точка или конец строки
         after_cat = text_lower[3:] if len(text_lower) > 3 else ""
         if not after_cat or after_cat[0] in [' ', ',', '.', '!', '?', '\n']:
             starts_with_cat = True
@@ -611,7 +595,7 @@ def handle_message(message):
     if not starts_with_cat and not is_reply_to_bot:
         return
 
-    # Убираем "кот" из начала сообщения (если оно есть)
+    # Убираем "кот" из начала сообщения
     clean_text = text
     if starts_with_cat:
         clean_text = re.sub(r'^[Кк]от[,\s]*', '', text).strip()
@@ -819,7 +803,6 @@ def handle_message(message):
         bot.reply_to(message, clear_memory(user_id))
         return
 
-    # Простые команды через fallback
     simple_response = fallback_response(text_lower, user_id, user_name)
     if simple_response:
         bot.reply_to(message, simple_response)
