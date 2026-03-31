@@ -60,13 +60,17 @@ def save_cache():
 anime_cache = load_cache()
 
 # ====== 🌐 ПЕРЕВОДЧИК ======
-def translate_to_russian(text):
-    """Переводит текст с японского/английского на русский"""
+def translate_to_english(text):
+    """Переводит текст на английский (автоопределение языка)"""
     try:
         if not text or text == "???":
             return text
         
-        translator = GoogleTranslator(source='auto', target='ru')
+        # Проверяем, не английский ли уже (есть латинские буквы)
+        if any(char.isalpha() and ord(char) < 128 for char in text):
+            return text
+        
+        translator = GoogleTranslator(source='auto', target='en')
         translated = translator.translate(text)
         return translated
     except Exception as e:
@@ -311,8 +315,8 @@ def get_random_anime(genres=None, year=None):
         anime = random.choice(result["data"])
         title = anime.get("title", {})
         name_raw = title.get("native") or title.get("english") or title.get("romaji") or "???"
-        name_ru = translate_to_russian(name_raw)
-        name_en = title.get("romaji") or "???"
+        # 🔥 ПЕРЕВОД НА АНГЛИЙСКИЙ (автоопределение языка)
+        name_en = translate_to_english(name_raw)
         score = anime.get("averageScore", "?")
         if score != "?":
             score = score / 10
@@ -322,7 +326,7 @@ def get_random_anime(genres=None, year=None):
 
         return f"""🎲 Тебе выпало:
 
-🎬 {name_ru}
+🎬 {name_en}
 ⭐ {score}/10
 🎭 {genres_list}
 📺 {episodes} эпизодов
@@ -348,8 +352,8 @@ def search_anime_by_name(anime_name):
             anime = result["data"][0]
             title = anime.get("title", {})
             name_raw = title.get("native") or title.get("english") or title.get("romaji") or "???"
-            name_ru = translate_to_russian(name_raw)
-            name_en = title.get("romaji") or "???"
+            # 🔥 ПЕРЕВОД НА АНГЛИЙСКИЙ (автоопределение языка)
+            name_en = translate_to_english(name_raw)
             score = anime.get("averageScore", "?")
             if score != "?":
                 score = score / 10
@@ -357,7 +361,7 @@ def search_anime_by_name(anime_name):
             year = anime.get("seasonYear", "?")
             genres = ", ".join(anime.get("genres", [])[:5])
 
-            output = f"""🎬 {name_ru}
+            output = f"""🎬 {name_en}
 
 📅 {year}
 ⭐ {score}/10
@@ -413,14 +417,15 @@ def get_top_anime(genre=None, year=None, limit=10):
         for i, anime in enumerate(data, 1):
             title = anime.get("title", {})
             name_raw = title.get("native") or title.get("english") or title.get("romaji") or "???"
-            name_ru = translate_to_russian(name_raw)
+            # 🔥 ПЕРЕВОД НА АНГЛИЙСКИЙ (автоопределение языка)
+            name_en = translate_to_english(name_raw)
             
             score = anime.get("averageScore", "?")
             if score != "?":
                 score = score / 10
             episodes = anime.get("episodes", "?")
             year_anime = anime.get("seasonYear", "?")
-            result_text += f"{i}. {name_ru} — {score}/10 ⭐\n"
+            result_text += f"{i}. {name_en} — {score}/10 ⭐\n"
             result_text += f"   📺 {episodes} эп. | 📅 {year_anime}\n"
 
         result_text += "\n🐱"
