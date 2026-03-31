@@ -8,6 +8,7 @@ import datetime
 import os
 import json
 import logging
+from googletrans import Translator
 
 # ====== 📊 ЛОГИРОВАНИЕ ======
 logging.basicConfig(
@@ -57,6 +58,29 @@ def save_cache():
         pass
 
 anime_cache = load_cache()
+
+# ====== 🌐 ПЕРЕВОДЧИК ======
+translator = Translator()
+
+def translate_to_russian(text):
+    """Переводит текст с японского/английского на русский"""
+    try:
+        if not text or text == "???":
+            return text
+        
+        # Пробуем определить язык
+        detected = translator.detect(text)
+        
+        # Если уже русский — возвращаем как есть
+        if detected.lang == 'ru':
+            return text
+        
+        # Переводим на русский
+        translated = translator.translate(text, dest='ru')
+        return translated.text
+    except Exception as e:
+        logger.error(f"Ошибка перевода: {e}")
+        return text
 
 # ====== ⚙️ НАСТРОЙКИ БОТА ======
 bot_settings = {
@@ -147,7 +171,7 @@ def start_city_game(user_id):
     }
     return f"🎮 Играем в города! Я называю {start_city}. Тебе на букву {last_letter.upper()}. Твой ход! 🐱"
 
-# ====== 🎭 ЖАНРЫ (для AniList) ======
+# ====== 🎭 ЖАНРЫ ======
 GENRE_MAP = {
     "боевик": "Action", "экшн": "Action",
     "романтика": "Romance",
@@ -185,9 +209,8 @@ def recommend_from_history(user_id):
         return get_random_anime()
     return get_random_anime(genres=prefs[-2:])
 
-# ====== 🎬 АНИМЕ API (AniList - основной) ======
+# ====== 🎬 АНИМЕ API (AniList) ======
 
-# 1. Поиск на AniList
 def search_anime_anilist(search_query, search_type="search"):
     """
     search_type: "search" - поиск по названию
@@ -223,7 +246,6 @@ def search_anime_anilist(search_query, search_type="search"):
                   episodes
                   seasonYear
                   genres
-                  description(asHtml: false)
                   siteUrl
                 }
               }
@@ -275,7 +297,7 @@ def search_anime_anilist(search_query, search_type="search"):
         logger.error(f"Ошибка AniList: {e}")
         return {"success": False}
 
-# 2. Случайное аниме
+# 2. Случайное аниме (с переводом)
 def get_random_anime(genres=None, year=None):
     try:
         # Преобразуем жанры
@@ -283,7 +305,7 @@ def get_random_anime(genres=None, year=None):
         if genres:
             anilist_genres = [GENRE_MAP.get(g, g.capitalize()) for g in genres if g in GENRE_MAP]
             if anilist_genres:
-                anilist_genres = anilist_genres[0]  # Берём первый жанр
+                anilist_genres = anilist_genres[0]
 
         result = search_anime_anilist({"genre": anilist_genres, "year": year}, "random")
         
@@ -298,7 +320,9 @@ def get_random_anime(genres=None, year=None):
 
         anime = random.choice(result["data"])
         title = anime.get("title", {})
-        name_ru = title.get("native") or title.get("english") or title.get("romaji") or "???"
+        name_raw = title.get("native") or title.get("english") or title.get("romaji") or "???"
+        # 🔥 ПЕРЕВОД НА РУССКИЙ
+        name_ru = translate_to_russian(name_raw)
         name_en = title.get("romaji") or "???"
         score = anime.get("averageScore", "?")
         if score != "?":
@@ -309,7 +333,7 @@ def get_random_anime(genres=None, year=None):
 
         return f"""🎲 Тебе выпало:
 
-🎬 «{name_ru}» ({name_en})
+🎬 {name_ru}
 ⭐ {score}/10
 🎭 {genres_list}
 📺 {episodes} эпизодов
@@ -321,7 +345,7 @@ def get_random_anime(genres=None, year=None):
         logger.error(f"Ошибка get_random_anime: {e}")
         return "Ошибка 😿 🐱"
 
-# 3. Поиск по названию
+# 3. Поиск по названию (с переводом)
 def search_anime_by_name(anime_name):
     try:
         # Проверка кэша
@@ -335,7 +359,9 @@ def search_anime_by_name(anime_name):
         if result["success"] and result["data"]:
             anime = result["data"][0]
             title = anime.get("title", {})
-            name_ru = title.get("native") or title.get("english") or title.get("romaji") or "???"
+            name_raw = title.get("native") or title.get("english") or title.get("romaji") or "???"
+            # 🔥 ПЕРЕВОД НА РУССКИЙ
+            name_ru = translate_to_russian(name_raw)
             name_en = title.get("romaji") or "???"
             score = anime.get("averageScore", "?")
             if score != "?":
@@ -344,7 +370,7 @@ def search_anime_by_name(anime_name):
             year = anime.get("seasonYear", "?")
             genres = ", ".join(anime.get("genres", [])[:5])
 
-            output = f"""🎬 «{name_ru}» ({name_en})
+            output = f"""🎬 {name_ru}
 
 📅 {year}
 ⭐ {score}/10
@@ -364,7 +390,7 @@ def search_anime_by_name(anime_name):
         logger.error(f"Ошибка search_anime_by_name: {e}")
         return "Ошибка! Попробуй другое название. 🐱"
 
-# 4. Топ аниме
+# 4. Топ аниме (с переводом)
 def get_top_anime(genre=None, year=None, limit=10):
     try:
         cache_key = f"top_{genre}_{year}_{limit}"
@@ -400,13 +426,16 @@ def get_top_anime(genre=None, year=None, limit=10):
 
         for i, anime in enumerate(data, 1):
             title = anime.get("title", {})
-            name = title.get("native") or title.get("english") or title.get("romaji") or "???"
+            name_raw = title.get("native") or title.get("english") or title.get("romaji") or "???"
+            # 🔥 ПЕРЕВОД НА РУССКИЙ
+            name_ru = translate_to_russian(name_raw)
+            
             score = anime.get("averageScore", "?")
             if score != "?":
                 score = score / 10
             episodes = anime.get("episodes", "?")
             year_anime = anime.get("seasonYear", "?")
-            result_text += f"{i}. «{name}» — {score}/10 ⭐\n"
+            result_text += f"{i}. {name_ru} — {score}/10 ⭐\n"
             result_text += f"   📺 {episodes} эп. | 📅 {year_anime}\n"
 
         result_text += "\n🐱"
@@ -467,6 +496,7 @@ def add_to_memory(user_id, role, content):
 
 def clear_memory(user_id):
     user_memory[user_id] = []
+    user_preferences[user_id] = []  # Очищаем и вкусы
     return "Забыл всё! Начинаем заново. 🐱"
 
 def ask_mistral(question, user_id, user_name, search_results=None, include_links=False):
@@ -567,10 +597,16 @@ def handle_message(message):
     if is_sleeping:
         return
 
-    # ====== ПРОВЕРКА: реагируем только если:
-    # 1. Сообщение начинается с "кот" (или "Кот")
+    # ====== 🔥 ПРОВЕРКА: реагируем только если:
+    # 1. Сообщение начинается с "кот" И после "кот" идёт пробел/запятая/конец сообщения
     # 2. ИЛИ это ответ на сообщение бота ======
-    starts_with_cat = text_lower.startswith("кот")
+    
+    starts_with_cat = False
+    if text_lower.startswith("кот"):
+        # Проверяем, что после "кот" идёт пробел, запятая, точка или конец строки
+        after_cat = text_lower[3:] if len(text_lower) > 3 else ""
+        if not after_cat or after_cat[0] in [' ', ',', '.', '!', '?', '\n']:
+            starts_with_cat = True
     
     if not starts_with_cat and not is_reply_to_bot:
         return
@@ -677,18 +713,15 @@ def handle_message(message):
             return
 
     # ====== 🎬 АНИМЕ ======
-    # Проверяем, есть ли что-то связанное с аниме
     anime_keywords = ["посоветуй аниме", "найди аниме", "топ аниме", "аниме"]
     
     if any(keyword in text_lower for keyword in anime_keywords):
-        # Случайное аниме
         if "посоветуй аниме" in text_lower:
             genres, year = parse_anime_request(text_lower)
             save_preferences(user_id, genres)
             bot.reply_to(message, get_random_anime(genres, year))
             return
         
-        # Поиск по названию
         if "найди аниме" in text_lower:
             anime_name = re.sub(r'(?i)найди аниме|найти аниме', '', clean_text).strip()
             if not anime_name:
@@ -697,7 +730,6 @@ def handle_message(message):
             bot.reply_to(message, search_anime_by_name(anime_name))
             return
         
-        # Топ аниме
         if "топ аниме" in text_lower:
             genres_list = ["боевик", "романтика", "комедия", "фэнтези", "драма", "ужасы"]
             found_genre = None
