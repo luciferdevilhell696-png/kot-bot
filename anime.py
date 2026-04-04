@@ -1,240 +1,271 @@
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Optional, Union
+# anime.py - модуль аниме
+import requests
+import random
+import re
+import time
+import json
+import logging
+import os
+from deep_translator import GoogleTranslator
 
-import ujson
-from geopy import Nominatim
-from geopy.exc import GeocoderServiceError
+logger = logging.getLogger(__name__)
 
-from app.bot.libs.http import AiohttpClient
-from app.config import settings
+# Кэш
+CACHE_FILE = "anime_cache.json"
+CACHE_EXPIRATION = 86400
 
+def load_cache():
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
 
-@dataclass(slots=True)
-class WeatherArticleResponse:
-    city: str
-    country: str
-    temp_c: float
-    condition: str
-    condition_code: int
-    feelslike_c: float
-    humidity: int
-    pressure_mb: int
-    wind_mph: float
-    last_updated: str
-    vis_km: int
-    wind_dir: str
-    sunrise: str
-    sunset: str
-    day_1_night_temp: float
-    day_1_night_condition: str
-    day_1_night_condition_code: int
-    day_1_morning_temp: float
-    day_1_morning_condition: str
-    day_1_morning_condition_code: int
-    day_1_day_temp: float
-    day_1_day_condition: str
-    day_1_day_condition_code: int
-    day_1_evening_temp: float
-    day_1_evening_condition: str
-    day_1_evening_condition_code: int
-    day_2_date: str
-    day_2_morning_temp: float
-    day_2_morning_condition: str
-    day_2_morning_condition_code: int
-    day_2_day_temp: float
-    day_2_day_condition: str
-    day_2_day_condition_code: int
-    day_2_evening_temp: float
-    day_2_evening_condition: str
-    day_2_evening_condition_code: int
-    day_2_night_temp: float
-    day_2_night_condition: str
-    day_2_night_condition_code: int
-    day_3_date: str
-    day_3_morning_temp: float
-    day_3_morning_condition: str
-    day_3_morning_condition_code: int
-    day_3_day_temp: float
-    day_3_day_condition: str
-    day_3_day_condition_code: int
-    day_3_evening_temp: float
-    day_3_evening_condition: str
-    day_3_evening_condition_code: int
-    day_3_night_temp: float
-    day_3_night_condition: str
-    day_3_night_condition_code: int
-
-
-@dataclass(slots=True)
-class Coordinate:
-    latitude: float
-    longitude: float
-
-
-def get_coordinates(city: str) -> Optional[Coordinate]:
-    geo = Nominatim(user_agent="my_services_bot")
-
+def save_cache(cache):
     try:
-        loc = geo.geocode(city)
-    except GeocoderServiceError:
-        return None
+        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
+    except:
+        pass
 
-    if loc is None:
-        return None
+anime_cache = load_cache()
 
-    return Coordinate(
-        latitude=loc.latitude,
-        longitude=loc.longitude,
-    )
+# Жанры
+GENRE_MAP = {
+    "боевик": "Action", "экшн": "Action",
+    "романтика": "Romance",
+    "комедия": "Comedy",
+    "фэнтези": "Fantasy", "фентези": "Fantasy",
+    "драма": "Drama",
+    "ужасы": "Horror", "хоррор": "Horror",
+    "фантастика": "Sci-Fi",
+    "триллер": "Thriller",
+    "детектив": "Mystery",
+    "меха": "Mecha",
+    "киберпанк": "Cyberpunk",
+    "школа": "School",
+    "спорт": "Sports",
+    "психология": "Psychological",
+    "мистика": "Mystery"
+}
 
+def translate_to_english(text):
+    try:
+        if not text or text == "???":
+            return text
+        if any(char.isalpha() and ord(char) < 128 for char in text):
+            return text
+        translator = GoogleTranslator(source='auto', target='en')
+        return translator.translate(text)
+    except:
+        return text
 
-def generate_current_date(date_timestamp: float) -> str:
-    return datetime.fromtimestamp(date_timestamp).strftime("%d.%m.%Y")
+def search_anime_anilist(search_query, search_type="search"):
+    try:
+        if search_type == "search":
+            query = """
+            query ($search: String) {
+              Media(search: $search, type: ANIME) {
+                id
+                title { romaji english native }
+                averageScore
+                episodes
+                seasonYear
+                genres
+                description(asHtml: false)
+                siteUrl
+              }
+            }
+            """
+            variables = {"search": search_query}
+        elif search_type == "random":
+            query = """
+            query ($page: Int, $perPage: Int, $genre: String, $year: Int) {
+              Page(page: $page, perPage: $perPage) {
+                media(type: ANIME, sort: POPULARITY_DESC, genre: $genre, seasonYear: $year) {
+                  id
+                  title { romaji english native }
+                  averageScore
+                  episodes
+                  seasonYear
+                  genres
+                  siteUrl
+                }
+              }
+            }
+            """
+            variables = {"page": 1, "perPage": 50}
+            if search_query.get("genre"):
+                variables["genre"] = search_query["genre"]
+            if search_query.get("year"):
+                variables["year"] = int(search_query["year"])
+        elif search_type == "top":
+            query = """
+            query ($page: Int, $perPage: Int, $genre: String, $year: Int) {
+              Page(page: $page, perPage: $perPage) {
+                media(type: ANIME, sort: SCORE_DESC, genre: $genre, seasonYear: $year) {
+                  id
+                  title { romaji english native }
+                  averageScore
+                  episodes
+                  seasonYear
+                  genres
+                  siteUrl
+                }
+              }
+            }
+            """
+            variables = {"page": 1, "perPage": 50}
+            if search_query.get("genre"):
+                variables["genre"] = search_query["genre"]
+            if search_query.get("year"):
+                variables["year"] = int(search_query["year"])
 
+        url = "https://graphql.anilist.co"
+        response = requests.post(url, json={"query": query, "variables": variables}, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            if search_type == "search":
+                media = data.get("data", {}).get("Media")
+                if media:
+                    return {"success": True, "data": [media]}
+            else:
+                media_list = data.get("data", {}).get("Page", {}).get("media", [])
+                if media_list:
+                    return {"success": True, "data": media_list}
+        return {"success": False}
+    except Exception as e:
+        logger.error(f"Ошибка AniList: {e}")
+        return {"success": False}
 
-class WeatherAPI:
-    BASE_URL = "https://api.weatherapi.com/v1/forecast.json?key={api_key}&q={coordinate}&days=3&aqi=no&lang=ru"
+def get_random_anime(genres=None, year=None):
+    try:
+        anilist_genres = None
+        if genres:
+            anilist_genres = [GENRE_MAP.get(g, g.capitalize()) for g in genres if g in GENRE_MAP]
+            if anilist_genres:
+                anilist_genres = anilist_genres[0]
 
-    def __init__(self) -> None:
-        self.http = AiohttpClient()
-        self._api_key = settings.WEATHER_API_KEY.get_secret_value()
+        result = search_anime_anilist({"genre": anilist_genres, "year": year}, "random")
+        if not result["success"] or not result["data"]:
+            if genres and year:
+                return f"Не нашёл аниме в жанре {', '.join(genres)} за {year} год 😿 🐱"
+            if genres:
+                return f"Не нашёл аниме в жанре {', '.join(genres)} 😿 🐱"
+            if year:
+                return f"Не нашёл аниме за {year} год 😿 🐱"
+            return "Ничего не нашёл 😿 🐱"
 
-    async def get_article(
-        self, city: str
-    ) -> Union[Optional[WeatherArticleResponse], str]:
-        coordinate = get_coordinates(city)
+        anime = random.choice(result["data"])
+        title = anime.get("title", {})
+        name_raw = title.get("native") or title.get("english") or title.get("romaji") or "???"
+        name_en = translate_to_english(name_raw)
+        score = anime.get("averageScore", "?")
+        if score != "?":
+            score = score / 10
+        episodes = anime.get("episodes", "?")
+        year_anime = anime.get("seasonYear", "?")
+        genres_list = ", ".join(anime.get("genres", [])[:3])
 
-        if coordinate is None:
-            return "Город не найден"
+        return f"""🎲 Тебе выпало:
 
-        response = await self.http.request_raw(
-            self.BASE_URL.format(
-                api_key=self._api_key,
-                coordinate=f"{coordinate.latitude},{coordinate.longitude}",
-            )
-        )
+🎬 {name_en}
+⭐ {score}/10
+🎭 {genres_list}
+📺 {episodes} эпизодов
+📅 {year_anime} год
 
-        match response.status:
-            case 200:
-                data = await response.json(
-                    encoding="utf-8", loads=ujson.loads, content_type=None
-                )
+Приятного просмотра! 🐱"""
+    except Exception as e:
+        logger.error(f"Ошибка get_random_anime: {e}")
+        return "Ошибка 😿 🐱"
 
-                location = data["location"]
-                current = data["current"]
+def search_anime_by_name(anime_name):
+    try:
+        if anime_name in anime_cache:
+            cache_time = anime_cache[anime_name].get("timestamp", 0)
+            if time.time() - cache_time < CACHE_EXPIRATION:
+                return anime_cache[anime_name]["result"]
 
-                forecast_day_1: dict = data["forecast"]["forecastday"][0]
-                forecast_day_2: dict = data["forecast"]["forecastday"][1]
-                forecast_day_3: dict = data["forecast"]["forecastday"][2]
-                "".rstrip()
-                sunrise = forecast_day_1["astro"]["sunrise"].rstrip(" AM")
-                sunset_12_hour = (
-                    forecast_day_1["astro"]["sunset"].rstrip(" PM").split(":")
-                )
-                sunset = f"{int(sunset_12_hour[0]) + 12}:{sunset_12_hour[1]}"
+        result = search_anime_anilist(anime_name, "search")
+        if result["success"] and result["data"]:
+            anime = result["data"][0]
+            title = anime.get("title", {})
+            name_raw = title.get("native") or title.get("english") or title.get("romaji") or "???"
+            name_en = translate_to_english(name_raw)
+            score = anime.get("averageScore", "?")
+            if score != "?":
+                score = score / 10
+            episodes = anime.get("episodes", "?")
+            year = anime.get("seasonYear", "?")
+            genres = ", ".join(anime.get("genres", [])[:5])
 
-                return WeatherArticleResponse(
-                    city=location["name"],
-                    country=location["country"],
-                    temp_c=current["temp_c"],
-                    condition=current["condition"]["text"],
-                    condition_code=int(current["condition"]["code"]),
-                    feelslike_c=current["feelslike_c"],
-                    humidity=current["humidity"],
-                    pressure_mb=round(int(current["pressure_mb"]) * 0.750062),
-                    wind_mph=current["wind_mph"],
-                    vis_km=current["vis_km"],
-                    wind_dir=current["wind_dir"],
-                    last_updated=datetime.fromtimestamp(
-                        current["last_updated_epoch"]
-                    ).strftime("%d.%m.%Y в %H:%M"),
-                    sunrise=sunrise,
-                    sunset=sunset,
-                    day_1_morning_temp=forecast_day_1["hour"][7]["temp_c"],
-                    day_1_day_temp=forecast_day_1["hour"][12]["temp_c"],
-                    day_1_evening_temp=forecast_day_1["hour"][18]["temp_c"],
-                    day_1_night_temp=forecast_day_1["hour"][0]["temp_c"],
-                    day_1_morning_condition=forecast_day_1["hour"][7]["condition"][
-                        "text"
-                    ],
-                    day_1_morning_condition_code=forecast_day_1["hour"][7]["condition"][
-                        "code"
-                    ],
-                    day_1_day_condition=forecast_day_1["hour"][12]["condition"]["text"],
-                    day_1_day_condition_code=forecast_day_1["hour"][12]["condition"][
-                        "code"
-                    ],
-                    day_1_evening_condition=forecast_day_1["hour"][18]["condition"][
-                        "text"
-                    ],
-                    day_1_evening_condition_code=forecast_day_1["hour"][18][
-                        "condition"
-                    ]["code"],
-                    day_1_night_condition=forecast_day_1["hour"][0]["condition"][
-                        "text"
-                    ],
-                    day_1_night_condition_code=forecast_day_1["hour"][0]["condition"][
-                        "code"
-                    ],
-                    day_2_date=generate_current_date(forecast_day_2["date_epoch"]),
-                    day_2_morning_temp=forecast_day_2["hour"][7]["temp_c"],
-                    day_2_day_temp=forecast_day_2["hour"][12]["temp_c"],
-                    day_2_evening_temp=forecast_day_2["hour"][18]["temp_c"],
-                    day_2_night_temp=forecast_day_2["hour"][0]["temp_c"],
-                    day_2_morning_condition=forecast_day_2["hour"][7]["condition"][
-                        "text"
-                    ],
-                    day_2_morning_condition_code=forecast_day_2["hour"][7]["condition"][
-                        "code"
-                    ],
-                    day_2_day_condition=forecast_day_2["hour"][12]["condition"]["text"],
-                    day_2_day_condition_code=forecast_day_2["hour"][12]["condition"][
-                        "code"
-                    ],
-                    day_2_evening_condition=forecast_day_2["hour"][18]["condition"][
-                        "text"
-                    ],
-                    day_2_evening_condition_code=forecast_day_2["hour"][18][
-                        "condition"
-                    ]["code"],
-                    day_2_night_condition=forecast_day_2["hour"][0]["condition"][
-                        "text"
-                    ],
-                    day_2_night_condition_code=forecast_day_2["hour"][0]["condition"][
-                        "code"
-                    ],
-                    day_3_date=generate_current_date(forecast_day_3["date_epoch"]),
-                    day_3_morning_temp=forecast_day_3["hour"][7]["temp_c"],
-                    day_3_day_temp=forecast_day_3["hour"][12]["temp_c"],
-                    day_3_evening_temp=forecast_day_3["hour"][18]["temp_c"],
-                    day_3_night_temp=forecast_day_3["hour"][0]["temp_c"],
-                    day_3_morning_condition=forecast_day_3["hour"][7]["condition"][
-                        "text"
-                    ],
-                    day_3_morning_condition_code=forecast_day_3["hour"][7]["condition"][
-                        "code"
-                    ],
-                    day_3_day_condition=forecast_day_3["hour"][12]["condition"]["text"],
-                    day_3_day_condition_code=forecast_day_3["hour"][12]["condition"][
-                        "code"
-                    ],
-                    day_3_evening_condition=forecast_day_3["hour"][18]["condition"][
-                        "text"
-                    ],
-                    day_3_evening_condition_code=forecast_day_3["hour"][18][
-                        "condition"
-                    ]["code"],
-                    day_3_night_condition=forecast_day_3["hour"][0]["condition"][
-                        "text"
-                    ],
-                    day_3_night_condition_code=forecast_day_3["hour"][0]["condition"][
-                        "code"
-                    ],
-                )
-            case 400:
-                return "Город не найден"
-            case 404:
-                return "Сервер погоды недоступен, попробуйте повторить через некоторое время"
-            case _:
-                return None
+            output = f"""🎬 {name_en}
+
+📅 {year}
+⭐ {score}/10
+🎭 {genres}
+📺 {episodes} эп.
+
+🔗 https://anilist.co/anime/{anime['id']}
+🐱"""
+
+            anime_cache[anime_name] = {"result": output, "timestamp": time.time()}
+            save_cache(anime_cache)
+            return output
+        return f"Не нашёл «{anime_name}» 😿 🐱"
+    except Exception as e:
+        logger.error(f"Ошибка search_anime_by_name: {e}")
+        return "Ошибка! Попробуй другое название. 🐱"
+
+def get_top_anime(genre=None, year=None, limit=10):
+    try:
+        cache_key = f"top_{genre}_{year}_{limit}"
+        if cache_key in anime_cache:
+            cache_time = anime_cache[cache_key].get("timestamp", 0)
+            if time.time() - cache_time < CACHE_EXPIRATION:
+                return anime_cache[cache_key]["result"]
+
+        anilist_genre = None
+        if genre:
+            anilist_genre = GENRE_MAP.get(genre, genre.capitalize())
+
+        result = search_anime_anilist({"genre": anilist_genre, "year": year}, "top")
+        if not result["success"] or not result["data"]:
+            if year and genre:
+                return f"Не нашёл топ аниме в жанре {genre} за {year} год 😿 🐱"
+            if year:
+                return f"Не нашёл топ аниме за {year} год 😿 🐱"
+            if genre:
+                return f"Не нашёл топ аниме в жанре {genre} 😿 🐱"
+            return "Ничего не нашёл 😿 🐱"
+
+        data = result["data"][:limit]
+        result_text = f"🔥 Топ-{min(limit, len(data))}"
+        if genre:
+            result_text += f" в жанре {genre}"
+        if year:
+            result_text += f" за {year} год"
+        result_text += ":\n\n"
+
+        for i, anime in enumerate(data, 1):
+            title = anime.get("title", {})
+            name_raw = title.get("native") or title.get("english") or title.get("romaji") or "???"
+            name_en = translate_to_english(name_raw)
+            score = anime.get("averageScore", "?")
+            if score != "?":
+                score = score / 10
+            episodes = anime.get("episodes", "?")
+            year_anime = anime.get("seasonYear", "?")
+            result_text += f"{i}. {name_en} — {score}/10 ⭐\n"
+            result_text += f"   📺 {episodes} эп. | 📅 {year_anime}\n"
+
+        result_text += "\n🐱"
+        anime_cache[cache_key] = {"result": result_text, "timestamp": time.time()}
+        save_cache(anime_cache)
+        return result_text
+    except Exception as e:
+        logger.error(f"Ошибка get_top_anime: {e}")
+        return "Ошибка 😿 🐱"
