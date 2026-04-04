@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 # ====== 🔐 ТОКЕНЫ ======
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
-WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
 SEARXNG_URL = "https://searxng-railway-production-6f14.up.railway.app/search"
 
 MASTER_USER_ID = 5939413307
@@ -100,42 +99,75 @@ def translate_to_english(text):
         logger.error(f"Ошибка перевода: {e}")
         return text
 
-# ====== 🌤️ ПОГОДА ======
+# ====== 🌤️ ПОГОДА (Open-Meteo - бесплатно, без ключа) ======
 def get_weather(city_name):
-    """Получает погоду для города через OpenWeatherMap"""
+    """Получает погоду для города через Open-Meteo (бесплатно, без ключа)"""
     try:
-        if not WEATHER_API_KEY:
-            return "❌ Погода не настроена. Добавь WEATHER_API_KEY в переменные Railway 🐱"
+        # Сначала получаем координаты города через геокодинг
+        geo_url = "https://geocoding-api.open-meteo.com/v1/search"
+        geo_params = {"name": city_name, "count": 1, "language": "ru", "format": "json"}
+        geo_response = requests.get(geo_url, params=geo_params, timeout=10)
         
-        url = "https://api.openweathermap.org/data/2.5/weather"
-        params = {
-            "q": city_name,
-            "appid": WEATHER_API_KEY,
-            "units": "metric",
-            "lang": "ru"
+        if geo_response.status_code != 200:
+            return "❌ Ошибка поиска города. Попробуй ещё раз. 🐱"
+        
+        geo_data = geo_response.json()
+        if not geo_data.get("results"):
+            return f"❌ Город '{city_name}' не найден. Проверь название 🐱"
+        
+        location = geo_data["results"][0]
+        lat = location["latitude"]
+        lon = location["longitude"]
+        city_display = location.get("name", city_name)
+        country = location.get("country", "")
+        
+        # Получаем погоду
+        weather_url = "https://api.open-meteo.com/v1/forecast"
+        weather_params = {
+            "latitude": lat,
+            "longitude": lon,
+            "current_weather": True,
+            "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m",
+            "timezone": "auto"
         }
-        response = requests.get(url, params=params, timeout=10)
+        weather_response = requests.get(weather_url, params=weather_params, timeout=10)
         
-        if response.status_code == 200:
-            data = response.json()
-            temp = data["main"]["temp"]
-            feels_like = data["main"]["feels_like"]
-            humidity = data["main"]["humidity"]
-            wind = data["wind"]["speed"]
-            description = data["weather"][0]["description"]
-            
-            return f"""🌤️ **Погода в {city_name.title()}:** 
+        if weather_response.status_code != 200:
+            return "❌ Ошибка получения погоды. Попробуй позже. 🐱"
+        
+        data = weather_response.json()
+        current = data.get("current_weather", {})
+        
+        temp = current.get("temperature", "?")
+        wind = current.get("windspeed", "?")
+        weather_code = current.get("weathercode", 0)
+        
+        # Расшифровка кода погоды
+        weather_codes = {
+            0: "Ясно ☀️", 1: "В основном ясно 🌤️", 2: "Переменная облачность ⛅",
+            3: "Пасмурно ☁️", 45: "Туман 🌫️", 51: "Морось 🌧️", 61: "Дождь 🌧️",
+            71: "Снег ❄️", 80: "Ливень ☔"
+        }
+        description = weather_codes.get(weather_code, "Облачно")
+        
+        # Получаем влажность из часовых данных
+        humidity = "?"
+        if "hourly" in data and "relative_humidity_2m" in data["hourly"]:
+            humidities = data["hourly"]["relative_humidity_2m"]
+            if humidities:
+                humidity = humidities[0]
+        
+        location_str = f"{city_display}, {country}" if country else city_display
+        
+        return f"""🌤️ **Погода в {location_str}:** 
 
-🌡️ Температура: {temp}°C (ощущается как {feels_like}°C)
+🌡️ Температура: {temp}°C
 💧 Влажность: {humidity}%
 💨 Ветер: {wind} м/с
-📖 {description.capitalize()}
+📖 {description}
 
 🐱"""
-        elif response.status_code == 404:
-            return f"❌ Город '{city_name}' не найден. Проверь название 🐱"
-        else:
-            return "❌ Ошибка получения погоды. Попробуй позже 🐱"
+        
     except Exception as e:
         logger.error(f"Ошибка погоды: {e}")
         return "❌ Ошибка! Попробуй ещё раз 🐱"
