@@ -1,4 +1,4 @@
-# weather.py - погода через WeatherAPI.com
+# weather.py - погода через WeatherAPI.com (исправленная)
 import requests
 import logging
 import os
@@ -13,28 +13,63 @@ def get_weather(city_name):
         if not WEATHER_API_KEY:
             return "❌ Погода не настроена. Добавь WEATHER_API_KEY в переменные Railway 🐱"
         
-        # Получаем координаты города через Nominatim
+        # 1. Сначала пробуем прямой запрос к WeatherAPI (без геокодера)
+        direct_url = "http://api.weatherapi.com/v1/forecast.json"
+        direct_params = {
+            "key": WEATHER_API_KEY,
+            "q": city_name,
+            "days": 3,
+            "lang": "ru",
+            "aqi": "no"
+        }
+        direct_response = requests.get(direct_url, params=direct_params, timeout=15)
+        
+        # Если прямой запрос сработал — используем его
+        if direct_response.status_code == 200:
+            data = direct_response.json()
+            location = data["location"]
+            current = data["current"]
+            forecast = data["forecast"]["forecastday"]
+            
+            result = format_weather_response(location, current, forecast)
+            return result
+        
+        # 2. Если прямой запрос не сработал (404) — пробуем геокодер
         geo_url = "https://nominatim.openstreetmap.org/search"
         geo_params = {
             "q": city_name,
             "format": "json",
-            "limit": 1,
+            "limit": 3,
             "accept-language": "ru"
         }
         geo_response = requests.get(geo_url, params=geo_params, headers={"User-Agent": "KotBot/1.0"}, timeout=10)
         
-        if geo_response.status_code != 200:
-            return "❌ Ошибка поиска города. Попробуй ещё раз. 🐱"
-        
-        geo_data = geo_response.json()
-        if not geo_data:
+        if geo_response.status_code != 200 or not geo_response.json():
             return f"❌ Город '{city_name}' не найден. Проверь название 🐱"
         
-        lat = geo_data[0]["lat"]
-        lon = geo_data[0]["lon"]
+        # Берём первый результат с самым высоким рейтингом (обычно главный город)
+        cities = geo_response.json()
         
-        # Получаем погоду через WeatherAPI
-        weather_url = "http://api.weatherapi.com/v1/forecast.json"
+        # Фильтруем: предпочитаем города без запятых в названии или с country = "Россия"
+        best_city = None
+        for city in cities:
+            display_name = city.get("display_name", "")
+            # Если название точно совпадает с запросом (без учёта регистра)
+            if city.get("name", "").lower() == city_name.lower():
+                best_city = city
+                break
+            # Если в отображаемом имени нет запятых (просто название города)
+            if display_name.count(",") <= 2:
+                best_city = city
+        
+        if not best_city:
+            best_city = cities[0]
+        
+        lat = best_city["lat"]
+        lon = best_city["lon"]
+        city_display = best_city.get("name", city_name)
+        
+        # Запрос погоды по координатам
         weather_params = {
             "key": WEATHER_API_KEY,
             "q": f"{lat},{lon}",
@@ -42,69 +77,53 @@ def get_weather(city_name):
             "lang": "ru",
             "aqi": "no"
         }
-        weather_response = requests.get(weather_url, params=weather_params, timeout=15)
+        weather_response = requests.get(direct_url, params=weather_params, timeout=15)
         
         if weather_response.status_code != 200:
             return "❌ Ошибка получения погоды. Попробуй позже. 🐱"
         
         data = weather_response.json()
-        
         location = data["location"]
         current = data["current"]
         forecast = data["forecast"]["forecastday"]
         
-        city_name_api = location["name"]
-        country = location["country"]
-        temp = current["temp_c"]
-        feels_like = current["feelslike_c"]
-        condition = current["condition"]["text"]
-        humidity = current["humidity"]
-        wind = current["wind_kph"]
-        pressure = round(current["pressure_mb"] * 0.750062)
-        visibility = current["vis_km"]
-        uv = current["uv"]
-        last_updated = current["last_updated"].split(" ")[0]
+        # Подменяем название города на то, что ввёл пользователь
+        location["name"] = city_display
         
-        sunrise = forecast[0]["astro"]["sunrise"]
-        sunset = forecast[0]["astro"]["sunset"]
-        
-        day_forecast = forecast[0]["day"]
-        day_temp = day_forecast["avgtemp_c"]
-        max_temp = day_forecast["maxtemp_c"]
-        min_temp = day_forecast["mintemp_c"]
-        day_condition = day_forecast["condition"]["text"]
-        
-        tomorrow = forecast[1]["day"] if len(forecast) > 1 else None
-        
-        result = f"""🌤️ **Погода в {city_name_api}, {country}**
-
-📅 {last_updated}
-
-🌡️ **Сейчас:** {temp}°C (ощущается как {feels_like}°C)
-📖 {condition}
-💧 Влажность: {humidity}%
-💨 Ветер: {wind} км/ч
-🎯 Давление: {pressure} мм рт.ст.
-👁️ Видимость: {visibility} км
-☀️ УФ-индекс: {uv}
-
-🌅 Восход: {sunrise} | Закат: {sunset}
-
-📊 **Сегодня:**
-🌡️ {day_temp}°C (мин: {min_temp}°C, макс: {max_temp}°C)
-📖 {day_condition}
-
-"""
-        if tomorrow:
-            result += f"""📆 **Завтра:**
-🌡️ {tomorrow['avgtemp_c']}°C (мин: {tomorrow['mintemp_c']}°C, макс: {tomorrow['maxtemp_c']}°C)
-📖 {tomorrow['condition']['text']}
-
-"""
-        
-        result += "🐱"
+        result = format_weather_response(location, current, forecast)
         return result
         
     except Exception as e:
         logger.error(f"Ошибка погоды: {e}")
         return "❌ Ошибка! Попробуй ещё раз 🐱"
+
+def format_weather_response(location, current, forecast):
+    """Форматирует ответ с погодой"""
+    result = f"""🌤️ **Погода в {location['name']}, {location['country']}**
+
+📅 {current['last_updated'].split(' ')[0]}
+
+🌡️ **Сейчас:** {current['temp_c']}°C (ощущается как {current['feelslike_c']}°C)
+📖 {current['condition']['text']}
+💧 Влажность: {current['humidity']}%
+💨 Ветер: {current['wind_kph']} км/ч
+🎯 Давление: {round(current['pressure_mb'] * 0.750062)} мм рт.ст.
+👁️ Видимость: {current['vis_km']} км
+☀️ УФ-индекс: {current['uv']}
+
+🌅 Восход: {forecast[0]['astro']['sunrise']} | Закат: {forecast[0]['astro']['sunset']}
+
+📊 **Сегодня:**
+🌡️ {forecast[0]['day']['avgtemp_c']}°C (мин: {forecast[0]['day']['mintemp_c']}°C, макс: {forecast[0]['day']['maxtemp_c']}°C)
+📖 {forecast[0]['day']['condition']['text']}
+
+"""
+    if len(forecast) > 1:
+        result += f"""📆 **Завтра:**
+🌡️ {forecast[1]['day']['avgtemp_c']}°C (мин: {forecast[1]['day']['mintemp_c']}°C, макс: {forecast[1]['day']['maxtemp_c']}°C)
+📖 {forecast[1]['day']['condition']['text']}
+
+"""
+    
+    result += "🐱"
+    return result
