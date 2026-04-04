@@ -11,7 +11,7 @@ import logging
 # Импортируем модули
 from weather import get_weather
 from anime import get_random_anime, search_anime_by_name, get_top_anime
-from cities import load_cities_from_file, start_city_game, bot_make_move, check_city_in_db, city_games, get_last_letter
+from cities import load_cities_from_file, start_city_game, get_city_by_letter, check_city_in_db, city_games, get_last_letter
 from utils import get_exact_datetime, search_web
 from currency import get_currency
 from news import get_news
@@ -187,8 +187,8 @@ def handle_message(message):
     if is_sleeping:
         return
 
-    # ====== 🔥 ПРОВЕРКА: реагируем ТОЛЬКО если:
-    # 1. Сообщение начинается с "кот" (пробел или конец после слова)
+    # ====== ПРОВЕРКА: реагируем только если:
+    # 1. Сообщение начинается с "кот"
     # 2. ИЛИ это ответ на сообщение бота ======
     starts_with_cat = False
     if text_lower.startswith("кот"):
@@ -213,13 +213,17 @@ def handle_message(message):
 
     # ====== 🎮 ИГРА В ГОРОДА ======
     if user_id in city_games:
-        if text_lower in ["сдаюсь", "выйти", "закончить"]:
+        # Проверяем сдачу (с "кот" в начале или без)
+        if text_lower in ["сдаюсь", "выйти", "закончить"] or text_lower == "кот сдаюсь":
             game = city_games.pop(user_id)
             bot.reply_to(message, f"🏆 Игра окончена! Ты назвал {game['user_cities_count']} городов. 🐱")
             return
+        
         if not clean_text.strip():
-            bot.reply_to(message, f"Напиши город на букву {city_games[user_id]['last_letter'].upper()}! 🐱")
+            game = city_games[user_id]
+            bot.reply_to(message, f"Напиши город на букву {game['last_letter'].upper()}! 🐱")
             return
+        
         game = city_games[user_id]
         exists, msg = check_city_in_db(clean_text, game["used_cities"])
         if not exists:
@@ -228,12 +232,18 @@ def handle_message(message):
         if clean_text[0].lower() != game["last_letter"]:
             bot.reply_to(message, f"Город должен начинаться на букву {game['last_letter'].upper()}! 🐱")
             return
+        
         game["used_cities"].append(clean_text.lower())
         game["user_cities_count"] += 1
         next_letter = get_last_letter(clean_text)
-        bot_city = bot_make_move(user_id)
+        
+        # Ход бота
+        bot_city = get_city_by_letter(next_letter, game["used_cities"])
+        
         if bot_city:
-            reply = f"✅ {clean_text}\n\n🤖 {bot_city}\n🎯 Тебе на {city_games[user_id]['last_letter'].upper()}! 🐱"
+            game["used_cities"].append(bot_city.lower())
+            game["last_letter"] = get_last_letter(bot_city)
+            reply = f"✅ {clean_text}\n\n🤖 {bot_city}\n🎯 Тебе на {game['last_letter'].upper()}! 🐱"
         else:
             city_games.pop(user_id)
             reply = f"✅ {clean_text}\n\n🏆 Я не нашёл город на {next_letter.upper()}! Ты победил! 🐱"
@@ -400,7 +410,7 @@ def handle_message(message):
 
 🎮 **ИГРЫ:**
 • сыграем в города
-• сдаюсь
+• сдаюсь (или кот сдаюсь)
 
 🌐 **ПОИСК:**
 • котопоиск (запрос)
