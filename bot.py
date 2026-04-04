@@ -4,6 +4,7 @@ import re
 import time
 from collections import defaultdict
 import random
+import datetime
 import os
 import logging
 
@@ -12,18 +13,14 @@ from weather import get_weather
 from anime import get_random_anime, search_anime_by_name, get_top_anime
 from cities import load_cities_from_file, start_city_game, bot_make_move, check_city_in_db, city_games, get_last_letter
 from utils import get_exact_datetime, search_web
-from news import get_news
 from currency import get_currency
-from jokes import get_joke
+from news import get_news
 
-# ====== 📊 ЛОГИРОВАНИЕ ======
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+# ====== ЛОГИРОВАНИЕ ======
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# ====== 🔐 ТОКЕНЫ ======
+# ====== ТОКЕНЫ ======
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
 SEARXNG_URL = "https://searxng-railway-production-6f14.up.railway.app/search"
@@ -37,13 +34,13 @@ if not TELEGRAM_TOKEN or not MISTRAL_API_KEY:
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-# ====== 📦 ПАМЯТЬ ======
+# ====== ПАМЯТЬ ======
 user_memory = defaultdict(list)
 user_preferences = defaultdict(list)
 MAX_MEMORY = 20
 is_sleeping = False
 
-# ====== ⚙️ НАСТРОЙКИ БОТА ======
+# ====== НАСТРОЙКИ БОТА ======
 bot_settings = {
     "max_tokens": 2000,
     "temperature": 0.7,
@@ -67,30 +64,19 @@ def get_settings_text():
 
 🐱"""
 
-# ====== 🕒 ДАТА ======
+# ====== ДАТА ======
 CURRENT_YEAR, CURRENT_MONTH, CURRENT_DAY = get_exact_datetime()
 
-# ====== 🎮 ЗАГРУЗКА ГОРОДОВ ======
+# ====== ЗАГРУЗКА ГОРОДОВ ======
 logger.info("Загрузка базы городов...")
 load_cities_from_file("городада.txt")
 
-# ====== 🎯 ПАРСИНГ ЖАНРОВ ======
+# ====== ЖАНРЫ ======
 GENRE_MAP = {
-    "боевик": "Action", "экшн": "Action",
-    "романтика": "Romance",
-    "комедия": "Comedy",
-    "фэнтези": "Fantasy", "фентези": "Fantasy",
-    "драма": "Drama",
-    "ужасы": "Horror", "хоррор": "Horror",
-    "фантастика": "Sci-Fi",
-    "триллер": "Thriller",
-    "детектив": "Mystery",
-    "меха": "Mecha",
-    "киберпанк": "Cyberpunk",
-    "школа": "School",
-    "спорт": "Sports",
-    "психология": "Psychological",
-    "мистика": "Mystery"
+    "боевик": "Action", "экшн": "Action", "романтика": "Romance",
+    "комедия": "Comedy", "фэнтези": "Fantasy", "драма": "Drama",
+    "ужасы": "Horror", "фантастика": "Sci-Fi", "триллер": "Thriller",
+    "детектив": "Mystery", "меха": "Mecha", "киберпанк": "Cyberpunk"
 }
 
 def parse_anime_request(text):
@@ -111,8 +97,8 @@ def recommend_from_history(user_id):
         return get_random_anime()
     return get_random_anime(genres=prefs[-2:])
 
-# ====== 🤖 MISTRAL AI ======
-SYSTEM_PROMPT = f"""Ты — кот-помощник по имени Кот. Ты умный, дружелюбный и остроумный.
+# ====== MISTRAL AI ======
+SYSTEM_PROMPT = f"""Ты — кот-помощник по имени Кот.
 
 ТЕКУЩАЯ ДАТА: {CURRENT_DAY}.{CURRENT_MONTH}.{CURRENT_YEAR}
 
@@ -135,7 +121,7 @@ def clear_memory(user_id):
     user_preferences[user_id] = []
     return "Забыл всё! Начинаем заново. 🐱"
 
-def ask_mistral(question, user_id, user_name, search_results=None, include_links=False):
+def ask_mistral(question, user_id, user_name):
     try:
         url = "https://api.mistral.ai/v1/chat/completions"
         headers = {
@@ -146,15 +132,7 @@ def ask_mistral(question, user_id, user_name, search_results=None, include_links
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         for msg in user_memory[user_id][-10:]:
             messages.append(msg)
-        
-        if search_results:
-            context = "\n\n".join([f"📌 {r['title']}\n{r['content']}" for r in search_results[:3]])
-            enhanced_question = f"{question}\n\nИнформация из интернета:\n{context}\n\nОтветь по делу."
-            if include_links:
-                enhanced_question += " В конце добавь ссылки."
-            messages.append({"role": "user", "content": enhanced_question})
-        else:
-            messages.append({"role": "user", "content": question})
+        messages.append({"role": "user", "content": question})
 
         payload = {
             "model": "mistral-small-latest",
@@ -172,9 +150,6 @@ def ask_mistral(question, user_id, user_name, search_results=None, include_links
                 answer = answer.rstrip() + " 🐱"
             add_to_memory(user_id, "user", question[:200])
             add_to_memory(user_id, "assistant", answer[:500])
-            if include_links and search_results:
-                links = "\n\n📌 Источники:\n" + "\n".join([r["url"] for r in search_results[:2]])
-                return answer + links
             return answer
         else:
             logger.error(f"Mistral API error: {response.status_code}")
@@ -183,27 +158,7 @@ def ask_mistral(question, user_id, user_name, search_results=None, include_links
         logger.error(f"Mistral error: {e}")
         return "Ошибка! Попробуй ещё раз. 🐱"
 
-def fallback_response(question, user_id, user_name):
-    q = question.lower()
-    
-    if "привет" in q:
-        return f"Привет, {user_name}! Как настроение? 🐱"
-    if "как дела" in q:
-        return f"Мурлычу отлично, {user_name}! А у тебя? 🐱"
-    if "спасибо" in q:
-        return f"Пожалуйста, {user_name}! 🐱"
-    if "пока" in q:
-        return f"Пока, {user_name}! Заходи ещё 🐱👋"
-    if "кто ты" in q:
-        return f"Я Кот! Твой пушистый помощник. Напиши «список команд» 🐱"
-    if "какой сейчас год" in q:
-        return f"Сейчас {CURRENT_YEAR} год! 🐱"
-    if "какая сегодня дата" in q:
-        return f"Сегодня {CURRENT_DAY}.{CURRENT_MONTH}.{CURRENT_YEAR} 🐱"
-    
-    return None
-
-# ====== 📋 ОСНОВНОЙ ХЕНДЛЕР ======
+# ====== ОСНОВНОЙ ХЕНДЛЕР ======
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     global is_sleeping
@@ -218,13 +173,12 @@ def handle_message(message):
     if chat_id not in ALLOWED_CHATS:
         return
 
-    # ====== 😴 РЕЖИМ СНА ======
+    # ====== РЕЖИМ СНА ======
     if user_id == MASTER_USER_ID:
         if "кот спать" in text_lower:
             is_sleeping = True
             bot.reply_to(message, f"Спокойной ночи, {user_name}! 😴🐱")
             return
-        
         if "кот проснись" in text_lower:
             is_sleeping = False
             bot.reply_to(message, f"Доброе утро, {user_name}! ☀️🐱")
@@ -233,64 +187,9 @@ def handle_message(message):
     if is_sleeping:
         return
 
-    # ====== 🔥 КОТОПОИСК ======
-    if "котопоиск" in text_lower:
-        include_links = "+ссылка" in text_lower
-        query = re.sub(r'котопоиск|\+ссылка', '', text_lower).strip()
-        if not query:
-            bot.reply_to(message, "Напиши что искать 🐱")
-            return
-        results = search_web(query, SEARXNG_URL)
-        if not results:
-            bot.reply_to(message, "Ничего не нашёл 😿🐱")
-            return
-        reply = "🔍 Нашёл:\n\n"
-        for r in results:
-            title = r.get("title", "Без названия")
-            url = r.get("url", "")
-            if include_links:
-                reply += f"📌 {title}\n{url}\n\n"
-            else:
-                reply += f"• {title}\n"
-        if not include_links:
-            reply += "\nДобавь +ссылка чтобы увидеть ссылки 🐱"
-        bot.reply_to(message, reply)
-        return
-
-    # ====== 🌤️ ПОГОДА ======
-    if "погода" in text_lower:
-        city = re.sub(r'^погода\s*', '', text_lower).strip()
-        city = re.sub(r'^кот\s*', '', city).strip()
-        if not city:
-            bot.reply_to(message, "Напиши город после команды 'погода'. Например: погода Москва 🐱")
-            return
-        weather = get_weather(city)
-        bot.reply_to(message, weather)
-        return
-
-    # ====== 💱 КУРСЫ ВАЛЮТ ======
-    if "курс" in text_lower or "валюта" in text_lower:
-        currency = get_currency()
-        bot.reply_to(message, currency)
-        return
-
-    # ====== 📰 НОВОСТИ ======
-    if "новости" in text_lower:
-        topic = re.sub(r'новости\s*', '', text_lower).strip()
-        topic = re.sub(r'^кот\s*', '', topic).strip()
-        if not topic or topic == "новости":
-            topic = None
-        news = get_news(topic)
-        bot.reply_to(message, news)
-        return
-
-    # ====== 😂 ШУТКИ ======
-    if "шутка" in text_lower or "анекдот" in text_lower or "расскажи шутку" in text_lower:
-        joke = get_joke()
-        bot.reply_to(message, joke)
-        return
-
-    # ====== ПРОВЕРКА: реагируем только если начинается с "кот" или ответ на бота ======
+    # ====== 🔥 ПРОВЕРКА: реагируем ТОЛЬКО если:
+    # 1. Сообщение начинается с "кот" (пробел или конец после слова)
+    # 2. ИЛИ это ответ на сообщение бота ======
     starts_with_cat = False
     if text_lower.startswith("кот"):
         after_cat = text_lower[3:] if len(text_lower) > 3 else ""
@@ -319,8 +218,7 @@ def handle_message(message):
             bot.reply_to(message, f"🏆 Игра окончена! Ты назвал {game['user_cities_count']} городов. 🐱")
             return
         if not clean_text.strip():
-            game = city_games[user_id]
-            bot.reply_to(message, f"Напиши город на букву {game['last_letter'].upper()}! 🐱")
+            bot.reply_to(message, f"Напиши город на букву {city_games[user_id]['last_letter'].upper()}! 🐱")
             return
         game = city_games[user_id]
         exists, msg = check_city_in_db(clean_text, game["used_cities"])
@@ -335,14 +233,14 @@ def handle_message(message):
         next_letter = get_last_letter(clean_text)
         bot_city = bot_make_move(user_id)
         if bot_city:
-            reply = f"✅ {clean_text}\n\n🤖 {bot_city}\n🎯 Тебе на {game['last_letter'].upper()}! 🐱"
+            reply = f"✅ {clean_text}\n\n🤖 {bot_city}\n🎯 Тебе на {city_games[user_id]['last_letter'].upper()}! 🐱"
         else:
             city_games.pop(user_id)
             reply = f"✅ {clean_text}\n\n🏆 Я не нашёл город на {next_letter.upper()}! Ты победил! 🐱"
         bot.reply_to(message, reply)
         return
 
-    if any(x in clean_text.lower() for x in ["сыграем в города", "игра города", "поиграем в города", "давай играть в города", "давай поиграем в города"]):
+    if any(x in clean_text.lower() for x in ["сыграем в города", "игра города", "поиграем в города", "давай играть в города"]):
         bot.reply_to(message, start_city_game(user_id))
         return
 
@@ -400,34 +298,31 @@ def handle_message(message):
             return
 
     # ====== 🎬 АНИМЕ ======
-    anime_keywords = ["посоветуй аниме", "найди аниме", "топ аниме", "аниме"]
-    
-    if any(keyword in text_lower for keyword in anime_keywords):
-        if "посоветуй аниме" in text_lower:
-            genres, year = parse_anime_request(text_lower)
-            save_preferences(user_id, genres)
-            bot.reply_to(message, get_random_anime(genres, year))
+    if "посоветуй аниме" in text_lower:
+        genres, year = parse_anime_request(text_lower)
+        save_preferences(user_id, genres)
+        bot.reply_to(message, get_random_anime(genres, year))
+        return
+
+    if "найди аниме" in text_lower:
+        anime_name = re.sub(r'(?i)найди аниме|найти аниме', '', clean_text).strip()
+        if not anime_name:
+            bot.reply_to(message, "Напиши название аниме после команды 🐱")
             return
-        
-        if "найди аниме" in text_lower:
-            anime_name = re.sub(r'(?i)найди аниме|найти аниме', '', clean_text).strip()
-            if not anime_name:
-                bot.reply_to(message, "Напиши название аниме после команды 🐱")
-                return
-            bot.reply_to(message, search_anime_by_name(anime_name))
-            return
-        
-        if "топ аниме" in text_lower:
-            genres_list = ["боевик", "романтика", "комедия", "фэнтези", "драма", "ужасы"]
-            found_genre = None
-            for genre in genres_list:
-                if genre in text_lower:
-                    found_genre = genre
-                    break
-            year_match = re.search(r'\b(19|20)\d{2}\b', text_lower)
-            year = year_match.group(0) if year_match else None
-            bot.reply_to(message, get_top_anime(genre=found_genre, year=year))
-            return
+        bot.reply_to(message, search_anime_by_name(anime_name))
+        return
+
+    if "топ аниме" in text_lower:
+        genres_list = ["боевик", "романтика", "комедия", "фэнтези", "драма", "ужасы"]
+        found_genre = None
+        for genre in genres_list:
+            if genre in text_lower:
+                found_genre = genre
+                break
+        year_match = re.search(r'\b(19|20)\d{2}\b', text_lower)
+        year = year_match.group(0) if year_match else None
+        bot.reply_to(message, get_top_anime(genre=found_genre, year=year))
+        return
 
     if "порекомендуй что-нибудь" in text_lower or "что посмотреть" in text_lower:
         bot.reply_to(message, recommend_from_history(user_id))
@@ -439,6 +334,57 @@ def handle_message(message):
             bot.reply_to(message, f"Твои любимые жанры: {', '.join(prefs)} 🐱")
         else:
             bot.reply_to(message, "Я ещё не понял твой вкус. Попроси посоветовать аниме с жанрами! 🐱")
+        return
+
+    # ====== 🌐 КОТОПОИСК ======
+    if "котопоиск" in text_lower:
+        include_links = "+ссылка" in text_lower
+        query = re.sub(r'котопоиск|\+ссылка', '', text_lower).strip()
+        if not query:
+            bot.reply_to(message, "Напиши что искать 🐱")
+            return
+        results = search_web(query, SEARXNG_URL)
+        if not results:
+            bot.reply_to(message, "Ничего не нашёл 😿🐱")
+            return
+        reply = "🔍 Нашёл:\n\n"
+        for r in results:
+            title = r.get("title", "Без названия")
+            url = r.get("url", "")
+            if include_links:
+                reply += f"📌 {title}\n{url}\n\n"
+            else:
+                reply += f"• {title}\n"
+        if not include_links:
+            reply += "\nДобавь +ссылка чтобы увидеть ссылки 🐱"
+        bot.reply_to(message, reply)
+        return
+
+    # ====== 🌤️ ПОГОДА ======
+    if "погода" in text_lower:
+        city = re.sub(r'^погода\s*', '', text_lower).strip()
+        city = re.sub(r'^кот\s*', '', city).strip()
+        if not city:
+            bot.reply_to(message, "Напиши город после команды 'погода'. Например: погода Москва 🐱")
+            return
+        weather = get_weather(city)
+        bot.reply_to(message, weather)
+        return
+
+    # ====== 💱 КУРСЫ ВАЛЮТ ======
+    if "курс" in text_lower or "валюта" in text_lower:
+        currency = get_currency()
+        bot.reply_to(message, currency)
+        return
+
+    # ====== 📰 НОВОСТИ ======
+    if "новости" in text_lower:
+        topic = re.sub(r'новости\s*', '', text_lower).strip()
+        topic = re.sub(r'^кот\s*', '', topic).strip()
+        if not topic or topic == "новости":
+            topic = None
+        news = get_news(topic)
+        bot.reply_to(message, news)
         return
 
     # ====== 💬 ОБЩЕНИЕ ======
@@ -468,9 +414,6 @@ def handle_message(message):
 
 📰 **НОВОСТИ:**
 • новости (тема)
-
-😂 **ШУТКИ:**
-• шутка
 
 💬 **ОБЩЕНИЕ:**
 • привет, как дела, спасибо, пока
@@ -502,9 +445,24 @@ def handle_message(message):
         bot.reply_to(message, f"Сегодня {CURRENT_DAY}.{CURRENT_MONTH}.{CURRENT_YEAR} 🐱")
         return
 
-    simple_response = fallback_response(text_lower, user_id, user_name)
-    if simple_response:
-        bot.reply_to(message, simple_response)
+    if "привет" in text_lower or "здарова" in text_lower:
+        bot.reply_to(message, f"Привет, {user_name}! Как настроение? 🐱")
+        return
+
+    if "как дела" in text_lower or "как ты" in text_lower:
+        bot.reply_to(message, f"Мурлычу отлично, {user_name}! А у тебя? 🐱")
+        return
+
+    if "спасибо" in text_lower:
+        bot.reply_to(message, f"Пожалуйста, {user_name}! 🐱")
+        return
+
+    if "пока" in text_lower or "до свидания" in text_lower:
+        bot.reply_to(message, f"Пока, {user_name}! Заходи ещё 🐱👋")
+        return
+
+    if "кто ты" in text_lower:
+        bot.reply_to(message, f"Я Кот! Твой пушистый помощник. Напиши «список команд» 🐱")
         return
 
     # ====== 🤖 УМНЫЙ ОТВЕТ (MISTRAL) ======
@@ -512,7 +470,7 @@ def handle_message(message):
     answer = ask_mistral(clean_text, user_id, user_name)
     bot.reply_to(message, answer)
 
-# ====== 🚀 ЗАПУСК ======
+# ====== ЗАПУСК ======
 if __name__ == "__main__":
     print("=" * 50)
     print("🐱 КОТ-БОТ PRO ЗАПУЩЕН!")
