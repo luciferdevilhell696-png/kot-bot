@@ -4,11 +4,17 @@ import re
 import time
 from collections import defaultdict
 import random
-import datetime
 import os
-import json
 import logging
-from deep_translator import GoogleTranslator
+
+# Импортируем модули
+from weather import get_weather
+from anime import get_random_anime, search_anime_by_name, get_top_anime
+from cities import load_cities_from_file, start_city_game, bot_make_move, check_city_in_db, city_games, get_last_letter
+from utils import get_exact_datetime, search_web
+from news import get_news
+from currency import get_currency
+from jokes import get_joke
 
 # ====== 📊 ЛОГИРОВАНИЕ ======
 logging.basicConfig(
@@ -37,141 +43,6 @@ user_preferences = defaultdict(list)
 MAX_MEMORY = 20
 is_sleeping = False
 
-# ====== 💾 КЭШ АНИМЕ ======
-CACHE_FILE = "anime_cache.json"
-CACHE_EXPIRATION = 86400
-
-def load_cache():
-    if os.path.exists(CACHE_FILE):
-        try:
-            with open(CACHE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            return {}
-    return {}
-
-def save_cache():
-    try:
-        with open(CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(anime_cache, f, ensure_ascii=False, indent=2)
-    except:
-        pass
-
-anime_cache = load_cache()
-
-# ====== 🕒 ТОЧНАЯ ДАТА И ВРЕМЯ ======
-def get_exact_datetime(timezone="Europe/Moscow"):
-    """Получает точную дату и время через worldtimeapi.org"""
-    try:
-        url = f"http://worldtimeapi.org/api/timezone/{timezone}"
-        response = requests.get(url, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            datetime_str = data.get("datetime", "")
-            if datetime_str:
-                date_part = datetime_str.split("T")[0]
-                year, month, day = date_part.split("-")
-                return int(year), int(month), int(day)
-        now = datetime.datetime.now()
-        return now.year, now.month, now.day
-    except Exception as e:
-        logger.error(f"Ошибка получения даты: {e}")
-        now = datetime.datetime.now()
-        return now.year, now.month, now.day
-
-CURRENT_YEAR, CURRENT_MONTH, CURRENT_DAY = get_exact_datetime()
-
-# ====== 🌐 ПЕРЕВОДЧИК ======
-def translate_to_english(text):
-    """Переводит текст на английский (автоопределение языка)"""
-    try:
-        if not text or text == "???":
-            return text
-        
-        if any(char.isalpha() and ord(char) < 128 for char in text):
-            return text
-        
-        translator = GoogleTranslator(source='auto', target='en')
-        translated = translator.translate(text)
-        return translated
-    except Exception as e:
-        logger.error(f"Ошибка перевода: {e}")
-        return text
-
-# ====== 🌤️ ПОГОДА (Open-Meteo - бесплатно, без ключа) ======
-def get_weather(city_name):
-    """Получает погоду для города через Open-Meteo (бесплатно, без ключа)"""
-    try:
-        # Сначала получаем координаты города через геокодинг
-        geo_url = "https://geocoding-api.open-meteo.com/v1/search"
-        geo_params = {"name": city_name, "count": 1, "language": "ru", "format": "json"}
-        geo_response = requests.get(geo_url, params=geo_params, timeout=10)
-        
-        if geo_response.status_code != 200:
-            return "❌ Ошибка поиска города. Попробуй ещё раз. 🐱"
-        
-        geo_data = geo_response.json()
-        if not geo_data.get("results"):
-            return f"❌ Город '{city_name}' не найден. Проверь название 🐱"
-        
-        location = geo_data["results"][0]
-        lat = location["latitude"]
-        lon = location["longitude"]
-        city_display = location.get("name", city_name)
-        country = location.get("country", "")
-        
-        # Получаем погоду
-        weather_url = "https://api.open-meteo.com/v1/forecast"
-        weather_params = {
-            "latitude": lat,
-            "longitude": lon,
-            "current_weather": True,
-            "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m",
-            "timezone": "auto"
-        }
-        weather_response = requests.get(weather_url, params=weather_params, timeout=10)
-        
-        if weather_response.status_code != 200:
-            return "❌ Ошибка получения погоды. Попробуй позже. 🐱"
-        
-        data = weather_response.json()
-        current = data.get("current_weather", {})
-        
-        temp = current.get("temperature", "?")
-        wind = current.get("windspeed", "?")
-        weather_code = current.get("weathercode", 0)
-        
-        # Расшифровка кода погоды
-        weather_codes = {
-            0: "Ясно ☀️", 1: "В основном ясно 🌤️", 2: "Переменная облачность ⛅",
-            3: "Пасмурно ☁️", 45: "Туман 🌫️", 51: "Морось 🌧️", 61: "Дождь 🌧️",
-            71: "Снег ❄️", 80: "Ливень ☔"
-        }
-        description = weather_codes.get(weather_code, "Облачно")
-        
-        # Получаем влажность из часовых данных
-        humidity = "?"
-        if "hourly" in data and "relative_humidity_2m" in data["hourly"]:
-            humidities = data["hourly"]["relative_humidity_2m"]
-            if humidities:
-                humidity = humidities[0]
-        
-        location_str = f"{city_display}, {country}" if country else city_display
-        
-        return f"""🌤️ **Погода в {location_str}:** 
-
-🌡️ Температура: {temp}°C
-💧 Влажность: {humidity}%
-💨 Ветер: {wind} м/с
-📖 {description}
-
-🐱"""
-        
-    except Exception as e:
-        logger.error(f"Ошибка погоды: {e}")
-        return "❌ Ошибка! Попробуй ещё раз 🐱"
-
 # ====== ⚙️ НАСТРОЙКИ БОТА ======
 bot_settings = {
     "max_tokens": 2000,
@@ -196,72 +67,14 @@ def get_settings_text():
 
 🐱"""
 
-# ====== 🎮 ИГРА В ГОРОДА ======
-city_games = {}
+# ====== 🕒 ДАТА ======
+CURRENT_YEAR, CURRENT_MONTH, CURRENT_DAY = get_exact_datetime()
 
-def load_cities_from_file(filename="городада.txt"):
-    cities_db = {}
-    try:
-        with open(filename, "r", encoding="utf-8") as f:
-            for line in f:
-                city = line.strip()
-                if not city:
-                    continue
-                first_letter = city[0].lower()
-                if first_letter not in cities_db:
-                    cities_db[first_letter] = []
-                cities_db[first_letter].append(city)
-        logger.info(f"Загружено городов: {sum(len(v) for v in cities_db.values())}")
-        return cities_db
-    except Exception as e:
-        logger.error(f"Ошибка загрузки городов: {e}")
-        return {}
-
-def get_city_by_letter(cities_db, letter, used_cities):
-    cities = cities_db.get(letter, [])
-    available = [c for c in cities if c.lower() not in used_cities]
-    return random.choice(available) if available else None
-
-def get_last_letter(city):
-    last = city[-1].lower()
-    if last in ['ь', 'ъ', 'ы'] and len(city) > 1:
-        return city[-2].lower()
-    return last
-
-def check_city_in_db(cities_db, city_name, used_cities):
-    city_lower = city_name.lower()
-    first_letter = city_name[0].lower()
-    if first_letter not in cities_db:
-        return False, f"Нет городов на букву {first_letter.upper()} 😿"
-    for c in cities_db[first_letter]:
-        if c.lower() == city_lower:
-            if city_lower in used_cities:
-                return False, f"Город {city_name} уже был! 🐱"
-            return True, "OK"
-    return False, f"Не знаю города {city_name} 😿"
-
+# ====== 🎮 ЗАГРУЗКА ГОРОДОВ ======
 logger.info("Загрузка базы городов...")
-CITIES_DB = load_cities_from_file("городада.txt")
+load_cities_from_file("городада.txt")
 
-def start_city_game(user_id):
-    if not CITIES_DB:
-        return "❌ База городов не загружена! 🐱"
-    start_cities = CITIES_DB.get("м", [])
-    if not start_cities:
-        for letter, cities in CITIES_DB.items():
-            if cities:
-                start_cities = cities
-                break
-    start_city = random.choice(start_cities)
-    last_letter = get_last_letter(start_city)
-    city_games[user_id] = {
-        "last_letter": last_letter,
-        "used_cities": [start_city.lower()],
-        "user_cities_count": 0
-    }
-    return f"🎮 Играем в города! Я называю {start_city}. Тебе на букву {last_letter.upper()}. Твой ход! 🐱"
-
-# ====== 🎭 ЖАНРЫ ======
+# ====== 🎯 ПАРСИНГ ЖАНРОВ ======
 GENRE_MAP = {
     "боевик": "Action", "экшн": "Action",
     "романтика": "Romance",
@@ -280,7 +93,6 @@ GENRE_MAP = {
     "мистика": "Mystery"
 }
 
-# ====== 🎯 ПАРСИНГ ======
 def parse_anime_request(text):
     text = text.lower()
     genres = [g for g in GENRE_MAP.keys() if g in text]
@@ -298,250 +110,6 @@ def recommend_from_history(user_id):
     if not prefs:
         return get_random_anime()
     return get_random_anime(genres=prefs[-2:])
-
-# ====== 🎬 АНИМЕ API (AniList) ======
-
-def search_anime_anilist(search_query, search_type="search"):
-    try:
-        if search_type == "search":
-            query = """
-            query ($search: String) {
-              Media(search: $search, type: ANIME) {
-                id
-                title { romaji english native }
-                averageScore
-                episodes
-                seasonYear
-                genres
-                description(asHtml: false)
-                siteUrl
-              }
-            }
-            """
-            variables = {"search": search_query}
-        
-        elif search_type == "random":
-            query = """
-            query ($page: Int, $perPage: Int, $genre: String, $year: Int) {
-              Page(page: $page, perPage: $perPage) {
-                media(type: ANIME, sort: POPULARITY_DESC, genre: $genre, seasonYear: $year) {
-                  id
-                  title { romaji english native }
-                  averageScore
-                  episodes
-                  seasonYear
-                  genres
-                  siteUrl
-                }
-              }
-            }
-            """
-            variables = {"page": 1, "perPage": 50}
-            if search_query.get("genre"):
-                variables["genre"] = search_query["genre"]
-            if search_query.get("year"):
-                variables["year"] = int(search_query["year"])
-        
-        elif search_type == "top":
-            query = """
-            query ($page: Int, $perPage: Int, $genre: String, $year: Int) {
-              Page(page: $page, perPage: $perPage) {
-                media(type: ANIME, sort: SCORE_DESC, genre: $genre, seasonYear: $year) {
-                  id
-                  title { romaji english native }
-                  averageScore
-                  episodes
-                  seasonYear
-                  genres
-                  siteUrl
-                }
-              }
-            }
-            """
-            variables = {"page": 1, "perPage": 50}
-            if search_query.get("genre"):
-                variables["genre"] = search_query["genre"]
-            if search_query.get("year"):
-                variables["year"] = int(search_query["year"])
-
-        url = "https://graphql.anilist.co"
-        response = requests.post(url, json={"query": query, "variables": variables}, timeout=15)
-
-        if response.status_code == 200:
-            data = response.json()
-            if search_type == "search":
-                media = data.get("data", {}).get("Media")
-                if media:
-                    return {"success": True, "data": [media], "source": "AniList"}
-            else:
-                media_list = data.get("data", {}).get("Page", {}).get("media", [])
-                if media_list:
-                    return {"success": True, "data": media_list, "source": "AniList"}
-        return {"success": False}
-    except Exception as e:
-        logger.error(f"Ошибка AniList: {e}")
-        return {"success": False}
-
-def get_random_anime(genres=None, year=None):
-    try:
-        anilist_genres = None
-        if genres:
-            anilist_genres = [GENRE_MAP.get(g, g.capitalize()) for g in genres if g in GENRE_MAP]
-            if anilist_genres:
-                anilist_genres = anilist_genres[0]
-
-        result = search_anime_anilist({"genre": anilist_genres, "year": year}, "random")
-        
-        if not result["success"] or not result["data"]:
-            if genres and year:
-                return f"Не нашёл аниме в жанре {', '.join(genres)} за {year} год 😿 🐱"
-            if genres:
-                return f"Не нашёл аниме в жанре {', '.join(genres)} 😿 🐱"
-            if year:
-                return f"Не нашёл аниме за {year} год 😿 🐱"
-            return "Ничего не нашёл 😿 🐱"
-
-        anime = random.choice(result["data"])
-        title = anime.get("title", {})
-        name_raw = title.get("native") or title.get("english") or title.get("romaji") or "???"
-        name_en = translate_to_english(name_raw)
-        score = anime.get("averageScore", "?")
-        if score != "?":
-            score = score / 10
-        episodes = anime.get("episodes", "?")
-        year_anime = anime.get("seasonYear", "?")
-        genres_list = ", ".join(anime.get("genres", [])[:3])
-
-        return f"""🎲 Тебе выпало:
-
-🎬 {name_en}
-⭐ {score}/10
-🎭 {genres_list}
-📺 {episodes} эпизодов
-📅 {year_anime} год
-
-Приятного просмотра! 🐱"""
-
-    except Exception as e:
-        logger.error(f"Ошибка get_random_anime: {e}")
-        return "Ошибка 😿 🐱"
-
-def search_anime_by_name(anime_name):
-    try:
-        if anime_name in anime_cache:
-            cache_time = anime_cache[anime_name].get("timestamp", 0)
-            if time.time() - cache_time < CACHE_EXPIRATION:
-                return anime_cache[anime_name]["result"]
-
-        result = search_anime_anilist(anime_name, "search")
-        
-        if result["success"] and result["data"]:
-            anime = result["data"][0]
-            title = anime.get("title", {})
-            name_raw = title.get("native") or title.get("english") or title.get("romaji") or "???"
-            name_en = translate_to_english(name_raw)
-            score = anime.get("averageScore", "?")
-            if score != "?":
-                score = score / 10
-            episodes = anime.get("episodes", "?")
-            year = anime.get("seasonYear", "?")
-            genres = ", ".join(anime.get("genres", [])[:5])
-
-            output = f"""🎬 {name_en}
-
-📅 {year}
-⭐ {score}/10
-🎭 {genres}
-📺 {episodes} эп.
-
-🔗 https://anilist.co/anime/{anime['id']}
-🐱"""
-
-            anime_cache[anime_name] = {"result": output, "timestamp": time.time()}
-            save_cache()
-            return output
-        
-        return f"Не нашёл «{anime_name}» 😿 🐱"
-
-    except Exception as e:
-        logger.error(f"Ошибка search_anime_by_name: {e}")
-        return "Ошибка! Попробуй другое название. 🐱"
-
-def get_top_anime(genre=None, year=None, limit=10):
-    try:
-        cache_key = f"top_{genre}_{year}_{limit}"
-        if cache_key in anime_cache:
-            cache_time = anime_cache[cache_key].get("timestamp", 0)
-            if time.time() - cache_time < CACHE_EXPIRATION:
-                return anime_cache[cache_key]["result"]
-
-        anilist_genre = None
-        if genre:
-            anilist_genre = GENRE_MAP.get(genre, genre.capitalize())
-
-        result = search_anime_anilist({"genre": anilist_genre, "year": year}, "top")
-        
-        if not result["success"] or not result["data"]:
-            if year and genre:
-                return f"Не нашёл топ аниме в жанре {genre} за {year} год 😿 🐱"
-            if year:
-                return f"Не нашёл топ аниме за {year} год 😿 🐱"
-            if genre:
-                return f"Не нашёл топ аниме в жанре {genre} 😿 🐱"
-            return "Ничего не нашёл 😿 🐱"
-
-        data = result["data"][:limit]
-
-        result_text = f"🔥 Топ-{min(limit, len(data))}"
-        if genre:
-            result_text += f" в жанре {genre}"
-        if year:
-            result_text += f" за {year} год"
-        result_text += ":\n\n"
-
-        for i, anime in enumerate(data, 1):
-            title = anime.get("title", {})
-            name_raw = title.get("native") or title.get("english") or title.get("romaji") or "???"
-            name_en = translate_to_english(name_raw)
-            
-            score = anime.get("averageScore", "?")
-            if score != "?":
-                score = score / 10
-            episodes = anime.get("episodes", "?")
-            year_anime = anime.get("seasonYear", "?")
-            result_text += f"{i}. {name_en} — {score}/10 ⭐\n"
-            result_text += f"   📺 {episodes} эп. | 📅 {year_anime}\n"
-
-        result_text += "\n🐱"
-
-        anime_cache[cache_key] = {"result": result_text, "timestamp": time.time()}
-        save_cache()
-
-        return result_text
-
-    except Exception as e:
-        logger.error(f"Ошибка get_top_anime: {e}")
-        return "Ошибка 😿 🐱"
-
-# ====== 🌐 ПОИСК В ИНТЕРНЕТЕ ======
-def search_web(query):
-    try:
-        response = requests.get(SEARXNG_URL, params={
-            "q": query, "format": "json", "language": "ru", "limit": 5
-        }, timeout=15)
-        if response.status_code == 200:
-            data = response.json()
-            results = data.get("results", [])
-            if results:
-                return [{
-                    "title": r.get("title", "Без названия"),
-                    "url": r.get("url", ""),
-                    "content": r.get("content", "")[:800]
-                } for r in results[:5]]
-        return None
-    except Exception as e:
-        logger.error(f"Ошибка поиска: {e}")
-        return None
 
 # ====== 🤖 MISTRAL AI ======
 SYSTEM_PROMPT = f"""Ты — кот-помощник по имени Кот. Ты умный, дружелюбный и остроумный.
@@ -665,14 +233,14 @@ def handle_message(message):
     if is_sleeping:
         return
 
-    # ====== 🔥 КОТОПОИСК (проверяем ДО удаления "кот") ======
+    # ====== 🔥 КОТОПОИСК ======
     if "котопоиск" in text_lower:
         include_links = "+ссылка" in text_lower
         query = re.sub(r'котопоиск|\+ссылка', '', text_lower).strip()
         if not query:
             bot.reply_to(message, "Напиши что искать 🐱")
             return
-        results = search_web(query)
+        results = search_web(query, SEARXNG_URL)
         if not results:
             bot.reply_to(message, "Ничего не нашёл 😿🐱")
             return
@@ -689,7 +257,7 @@ def handle_message(message):
         bot.reply_to(message, reply)
         return
 
-    # ====== 🌤️ ПОГОДА (проверяем ДО удаления "кот") ======
+    # ====== 🌤️ ПОГОДА ======
     if "погода" in text_lower:
         city = re.sub(r'^погода\s*', '', text_lower).strip()
         city = re.sub(r'^кот\s*', '', city).strip()
@@ -698,6 +266,28 @@ def handle_message(message):
             return
         weather = get_weather(city)
         bot.reply_to(message, weather)
+        return
+
+    # ====== 💱 КУРСЫ ВАЛЮТ ======
+    if "курс" in text_lower or "валюта" in text_lower:
+        currency = get_currency()
+        bot.reply_to(message, currency)
+        return
+
+    # ====== 📰 НОВОСТИ ======
+    if "новости" in text_lower:
+        topic = re.sub(r'новости\s*', '', text_lower).strip()
+        topic = re.sub(r'^кот\s*', '', topic).strip()
+        if not topic or topic == "новости":
+            topic = None
+        news = get_news(topic)
+        bot.reply_to(message, news)
+        return
+
+    # ====== 😂 ШУТКИ ======
+    if "шутка" in text_lower or "анекдот" in text_lower or "расскажи шутку" in text_lower:
+        joke = get_joke()
+        bot.reply_to(message, joke)
         return
 
     # ====== ПРОВЕРКА: реагируем только если начинается с "кот" или ответ на бота ======
@@ -733,7 +323,7 @@ def handle_message(message):
             bot.reply_to(message, f"Напиши город на букву {game['last_letter'].upper()}! 🐱")
             return
         game = city_games[user_id]
-        exists, msg = check_city_in_db(CITIES_DB, clean_text, game["used_cities"])
+        exists, msg = check_city_in_db(clean_text, game["used_cities"])
         if not exists:
             bot.reply_to(message, msg)
             return
@@ -743,10 +333,8 @@ def handle_message(message):
         game["used_cities"].append(clean_text.lower())
         game["user_cities_count"] += 1
         next_letter = get_last_letter(clean_text)
-        bot_city = get_city_by_letter(CITIES_DB, next_letter, game["used_cities"])
+        bot_city = bot_make_move(user_id)
         if bot_city:
-            game["used_cities"].append(bot_city.lower())
-            game["last_letter"] = get_last_letter(bot_city)
             reply = f"✅ {clean_text}\n\n🤖 {bot_city}\n🎯 Тебе на {game['last_letter'].upper()}! 🐱"
         else:
             city_games.pop(user_id)
@@ -875,6 +463,15 @@ def handle_message(message):
 🌤️ **ПОГОДА:**
 • погода (город)
 
+💱 **КУРСЫ:**
+• курс валют
+
+📰 **НОВОСТИ:**
+• новости (тема)
+
+😂 **ШУТКИ:**
+• шутка
+
 💬 **ОБЩЕНИЕ:**
 • привет, как дела, спасибо, пока
 • какой сейчас год, какая сегодня дата
@@ -929,9 +526,6 @@ if __name__ == "__main__":
     
     print(f"Хозяин ID: {MASTER_USER_ID}")
     print(f"Разрешённые чаты: {ALLOWED_CHATS}")
-    print(f"База городов: {sum(len(v) for v in CITIES_DB.values()) if CITIES_DB else 0} городов")
-    print(f"Кэш аниме: {len(anime_cache)} записей")
-    print(f"Текущая дата: {CURRENT_DAY}.{CURRENT_MONTH}.{CURRENT_YEAR}")
     print("=" * 50)
 
     try:
