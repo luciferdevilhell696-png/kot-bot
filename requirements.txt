@@ -1,4 +1,5 @@
-pytelegrambotapi
+pyTelegramBotAPI
 requests
 python-dotenv
 deep-translator
+pytz
